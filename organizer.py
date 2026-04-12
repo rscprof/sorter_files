@@ -167,6 +167,54 @@ class FileOrganizer:
                 self.errors.append(f"Не распакован: {info.original_path}")
 
     # ── Шаг 6: Перемещение ───────────────────────
+    def _print_decision(self, info: FileInfo, dry_run: bool = False):
+        """Вывести подробное решение по файлу."""
+        prefix = "  │ "
+        logger.info(f"{prefix}📁 Категория: {info.ai_category or '—'}")
+        if info.ai_subcategory:
+            logger.info(f"{prefix}📂 Подкатегория: {info.ai_subcategory}")
+        if info.ai_suggested_name:
+            logger.info(f"{prefix}✏️  Имя: {info.ai_suggested_name}.{info.extension}")
+        if info.ai_description:
+            logger.info(f"{prefix}💬 {info.ai_description}")
+        if info.ai_reasoning:
+            logger.info(f"{prefix}🤔 {info.ai_reasoning}")
+        if info.is_build_artifact:
+            logger.info(f"{prefix}🔨 BUILD-АРТЕФАКТ → удаление")
+        if info.is_archive:
+            logger.info(f"{prefix}📦 Архив → распаковка и анализ содержимого")
+        if info.is_distributable or info.should_delete:
+            logger.info(f"{prefix}🗑  Дистрибутив → в каталог «на_удаление»")
+        if info.is_duplicate:
+            action_labels = {
+                "delete": "удалить (дубликат)",
+                "keep": "оставить (оригинал)",
+                "keep_as_project_part": "оставить (часть проекта)",
+            }
+            logger.info(f"{prefix}📋 Дубликат → {action_labels.get(info.duplicate_action, info.duplicate_action)}")
+            if info.duplicate_of:
+                logger.info(f"{prefix}    оригинал: {Path(info.duplicate_of).name}")
+        if info.is_part_of_project:
+            logger.info(f"{prefix}🛠  Часть проекта: {Path(info.project_root).name if info.project_root else '?'}")
+        if info.related_files:
+            logger.info(f"{prefix}🔗 Связанные: {len(info.related_files)} файлов")
+        if info.image_metadata:
+            md = info.image_metadata
+            parts = []
+            if md.camera_make:
+                parts.append(f"{md.camera_make} {md.camera_model or ''}")
+            if md.date_taken:
+                parts.append(md.date_taken[:16].replace("T", " "))
+            if md.latitude is not None:
+                parts.append(f"GPS {md.latitude:.4f}, {md.longitude:.4f}")
+            if parts:
+                logger.info(f"{prefix}📷 EXIF: {', '.join(parts)}")
+        target = self.determine_target_path(info)
+        if dry_run:
+            logger.info(f"{prefix}└─ ▶ {target}")
+        else:
+            logger.info(f"{prefix}└─ ▶ {target}")
+        print()  # пустая строка-разделитель
     def determine_target_path(self, info: FileInfo) -> str:
         """Определить куда переместить файл."""
         # Уже обработан — используем сохранённый путь
@@ -276,14 +324,16 @@ class FileOrganizer:
             # Пропускаем уже обработанные
             fh = compute_file_hash(fp)
             if self.state.is_already_processed(fh) and not dry_run:
-                logger.info(f"Пропуск (уже обработан): {Path(fp).name}")
+                logger.info(f"  ⏭ Пропуск (уже обработан): {Path(fp).name}")
                 continue
             try:
-                logger.info(f"  {Path(fp).name}")
+                logger.info(f"  ┌─ {Path(fp).name}")
                 info = self.analyze_file(fp)
                 self.file_infos.append(info)
+                # Сразу показываем решение
+                self._print_decision(info, dry_run=dry_run)
             except Exception as e:
-                logger.error(f"Ошибка анализа {fp}: {e}")
+                logger.error(f"  ✗ Ошибка анализа {fp}: {e}")
                 self.errors.append(str(e))
 
         # 3. Дубликаты

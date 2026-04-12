@@ -3,3 +3,4 @@ __pycache__/
 *.log
 organizer_report.json
 state.json
+.venv/
