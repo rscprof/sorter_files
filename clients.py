@@ -79,6 +79,7 @@ class LocalAIClient:
             logger.debug("=" * 70)
 
         try:
+            logger.info(f"  → Запрос к LocalAI (model={self.model}, timeout=600s)...")
             resp = self.session.post(
                 f"{self.base_url}/chat/completions",
                 json={
@@ -87,8 +88,9 @@ class LocalAIClient:
                     "temperature": 0.15,
                     "max_tokens": 600,
                 },
-                timeout=180,
+                timeout=600,
             )
+            logger.info(f"  ← Ответ получен, HTTP {resp.status_code}")
             resp.raise_for_status()
 
             # RAW ответ до любой обработки
@@ -109,8 +111,8 @@ class LocalAIClient:
                 logger.debug("=" * 70)
 
             return self._parse_json_response(content)
-        except requests.exceptions.Timeout:
-            print(f"[LocalAI] Таймаут (>90с), пропуск AI-анализа")
+        except Exception as e:
+            print(f"[LocalAI] Ошибка: {e}")
             return {}
 
     def _build_text_prompt(self, text: str, context: str) -> str:

@@ -96,41 +96,61 @@ def _extract_xlsx(filepath: str) -> str:
 
 
 def _extract_pptx(filepath: str) -> str:
-    """Текст из .pptx."""
+    """Текст из .pptx включая таблицы."""
+    texts = []
+
+    # Пробуем python-pptx
     try:
         from pptx import Presentation
         prs = Presentation(filepath)
-        texts = []
         for slide in prs.slides:
             for shape in slide.shapes:
                 if shape.has_text_frame:
                     for para in shape.text_frame.paragraphs:
                         if para.text.strip():
                             texts.append(para.text)
-        return "\n".join(texts)[:5000]
+                if shape.has_table:
+                    for row in shape.table.rows:
+                        row_texts = []
+                        for cell in row.cells:
+                            if cell.text.strip():
+                                row_texts.append(cell.text.strip())
+                        if row_texts:
+                            texts.append(" | ".join(row_texts))
     except ImportError:
-        return _extract_office_text(filepath)
+        pass
     except Exception:
-        return _extract_office_text(filepath)
+        pass
+
+    if texts:
+        return "\n".join(texts)[:10000]
+
+    # Fallback: zip-распаковка
+    return _extract_office_text(filepath)
 
 
 def _extract_office_text(filepath: str) -> str:
     """Fallback: извлечь текст из Office XML внутри zip."""
     import zipfile
+    import re
     try:
         with zipfile.ZipFile(filepath) as zf:
             text = ""
             for name in zf.namelist():
-                if name.endswith(".xml") and "document" in name.lower():
-                    import re
-                    raw = zf.read(name).decode("utf-8", errors="ignore")
-                    # Убираем XML-теги, оставляем текст
-                    clean = re.sub(r"<[^>]+>", " ", raw)
-                    clean = re.sub(r"\s+", " ", clean).strip()
+                if not name.endswith(".xml"):
+                    continue
+                # pptx: slideN.xml, presentation.xml
+                # docx: document.xml
+                # xlsx: sheetN.xml
+                raw = zf.read(name).decode("utf-8", errors="ignore")
+                # Вытаскиваем текст из XML-тегов
+                clean = re.sub(r"<[^>]+>", " ", raw)
+                clean = re.sub(r"\s+", " ", clean).strip()
+                if clean:
                     text += clean + "\n"
-            return text[:5000] if text else _quick_signature(filepath, "office")
+            return text[:10000] if text else f"[Office файл, размер: {os.path.getsize(filepath)} байт]"
     except Exception:
-        return _quick_signature(filepath, "office")
+        return f"[Office файл, размер: {os.path.getsize(filepath)} байт]"
 
 
 def _extract_pdf(filepath: str) -> str:
