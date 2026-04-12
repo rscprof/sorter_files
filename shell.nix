@@ -1,4 +1,4 @@
-{ pkgs ? import <nixpkgs> {} }:
+{ pkgs ? import <nixpkgs> { config.allowUnfree = true; } }:
 
 pkgs.mkShell {
   name = "file-organizer";
@@ -13,9 +13,9 @@ pkgs.mkShell {
     python313Packages.python-pptx
 
     # Утилиты для анализа
-    poppler_utils   # pdftotext
+    poppler-utils   # pdftotext
     p7zip           # 7z
-    rar             # unrar
+    rar             # unrar (unfree)
     file            # libmagic
     exiftool        # EXIF-парсер
 
@@ -30,6 +30,7 @@ pkgs.mkShell {
     echo "  pdftotext: $(which pdftotext)"
     echo "  7z: $(which 7z)"
     echo "  unrar: $(which unrar)"
+    echo "  exiftool: $(which exiftool)"
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     export PYTHONPATH="$(pwd):$PYTHONPATH"
   '';
