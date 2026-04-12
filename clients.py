@@ -27,40 +27,39 @@ class LocalAIClient:
         self.session.timeout = 180
 
     def analyze_content(self, text_content: str = "", image_path: str = "",
-                        file_context: str = "") -> dict:
+                        file_context: str = "", existing_categories: str = "") -> dict:
         """
         Универсальный анализ: текст, изображение или оба.
-        Возвращает dict с ключами: category, subcategory, suggested_name,
-        description, is_distributable, related_keywords, reasoning.
-        Категории НЕ фиксированы — AI решает сам.
         """
         messages = []
 
-        # Системный промпт
+        # Системный промпт — акцент на тематике/месте/событии
         system_msg = {
             "role": "system",
             "content": (
                 "Ты — ассистент для организации файлового архива. "
                 "Твоя задача — проанализировать содержимое и определить: "
-                "1) КАТЕГОРИЮ (свою, не из списка — опиши своими словами, например "
-                "'учебник по геометрии', 'рабочие документы колледжа', 'аудиокнига по философии'). "
-                "2) ПОДКАТЕГОРИЮ (уточнение). "
+                "1) КАТЕГОРИЮ — по тематике, месту или событию (НЕ по типу контента). "
+                "   Например: 'Южная Корея', 'Колледж', 'Церковные документы', а не 'Финансы' или 'Презентации'. "
+                "2) ПОДКАТЕГОРИЮ — тоже по теме/событию, а не по формату. "
+                "   Например: 'Бюджет', 'Лекции', 'Фотографии', а не 'Таблицы' или 'Документы'. "
                 "3) Понятное ИМЯ ФАЙЛА. "
                 "4) Краткое ОПИСАНИЕ. "
                 "5) Является ли файл ОБЩЕДОСТУПНЫМ ДИСТРИБУТИВОМ (который можно скачать заново). "
                 "6) Ключевые слова для поиска СВЯЗАННЫХ файлов. "
-                "7) Краткое ОБОСНОВАНИЕ решения."
+                "7) Краткое ОБОСНОВАНИЕ решения. "
+                "Если есть уже существующие категории — старайся использовать их вместо создания новых."
             ),
         }
         messages.append(system_msg)
 
         # Формируем контент
         if image_path and text_content:
-            user_content = self._build_multimodal_prompt(text_content, image_path, file_context)
+            user_content = self._build_multimodal_prompt(text_content, image_path, file_context, existing_categories)
         elif image_path:
-            user_content = self._build_image_prompt(file_context)
+            user_content = self._build_image_prompt(file_context, existing_categories)
         elif text_content:
-            user_content = self._build_text_prompt(text_content, file_context)
+            user_content = self._build_text_prompt(text_content, file_context, existing_categories)
         else:
             return {}
 
@@ -86,7 +85,7 @@ class LocalAIClient:
                     "model": self.model,
                     "messages": messages,
                     "temperature": 0.15,
-                    "max_tokens": 600,
+                    "max_tokens": 4096,
                 },
                 timeout=600,
             )
@@ -115,33 +114,36 @@ class LocalAIClient:
             print(f"[LocalAI] Ошибка: {e}")
             return {}
 
-    def _build_text_prompt(self, text: str, context: str) -> str:
+    def _build_text_prompt(self, text: str, context: str, existing_categories: str = "") -> str:
+        cats = existing_categories + "\n" if existing_categories else ""
         return f"""Проанализируй содержимое файла.
 
 {f"Контекст: {context}" if context else ""}
-
+{cats}
 --- Начало содержимого ---
 {text[:5000]}
 --- Конец содержимого ---
 
-Ответь ТОЛЬКО в JSON:
+Ответь ТОЛЬКО валидным JSON без markdown-оформления, без ```json, без текста — просто чистый JSON:
 {{"category": "...", "subcategory": "...", "suggested_name": "...", "description": "...", "is_distributable": false, "related_keywords": ["..."], "reasoning": "..."}}"""
 
-    def _build_image_prompt(self, context: str) -> list:
+    def _build_image_prompt(self, context: str, existing_categories: str = "") -> list:
+        cats = existing_categories + "\n" if existing_categories else ""
         return [
-            {"type": "text", "text": f"Опиши это изображение и классифицируй его.{f' Контекст: {context}' if context else ''}"},
+            {"type": "text", "text": f"Опиши это изображение и классифицируй его.{f' Контекст: {context}' if context else ''}\n{cats}"},
             {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,{{B64}}"}},
-            {"type": "text", "text": 'Ответь ТОЛЬКО в JSON: {"category": "...", "subcategory": "...", "suggested_name": "...", "description": "...", "is_distributable": false, "related_keywords": ["..."], "reasoning": "..."}'},
+            {"type": "text", "text": 'Ответь ТОЛЬКО валидным JSON без markdown-оформления, без ```json: {"category": "...", "subcategory": "...", "suggested_name": "...", "description": "...", "is_distributable": false, "related_keywords": ["..."], "reasoning": "..."}'},
         ]
 
-    def _build_multimodal_prompt(self, text: str, image_path: str, context: str) -> list:
+    def _build_multimodal_prompt(self, text: str, image_path: str, context: str, existing_categories: str = "") -> list:
         with open(image_path, "rb") as f:
             img_b64 = base64.b64encode(f.read()).decode()
 
+        cats = existing_categories + "\n" if existing_categories else ""
         return [
-            {"type": "text", "text": f"Проанализируй файл. Извлечённый текст: {text[:3000]}{f' Контекст: {context}' if context else ''}"},
+            {"type": "text", "text": f"Проанализируй файл. Извлечённый текст: {text[:3000]}{f' Контекст: {context}' if context else ''}\n{cats}"},
             {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}},
-            {"type": "text", "text": 'Ответь ТОЛЬКО в JSON: {"category": "...", "subcategory": "...", "suggested_name": "...", "description": "...", "is_distributable": false, "related_keywords": ["..."], "reasoning": "..."}'},
+            {"type": "text", "text": 'Ответь ТОЛЬКО валидным JSON без markdown-оформления, без ```json: {"category": "...", "subcategory": "...", "suggested_name": "...", "description": "...", "is_distributable": false, "related_keywords": ["..."], "reasoning": "..."}'},
         ]
 
     def _parse_json_response(self, content: str) -> dict:

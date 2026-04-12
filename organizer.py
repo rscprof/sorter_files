@@ -46,6 +46,8 @@ class FileOrganizer:
         self.all_files: list[str] = []
         self.file_infos: list[FileInfo] = []
         self.errors: list[str] = []
+        self.existing_categories: set[str] = set()
+        self.existing_subcategories: dict[str, set[str]] = {}  # category -> {subcategories}
 
     # ── Шаг 1: Сбор ──────────────────────────────
     def collect_files(self) -> list[str]:
@@ -115,10 +117,12 @@ class FileOrganizer:
 
         # AI-анализ (текст и/или изображение)
         text = extract_text(filepath)
+        cat_context = self._get_categories_context()
         ai_result = self.localai.analyze_content(
             text_content=text,
             image_path=filepath if is_image(filepath) else "",
             file_context=f"Имя: {p.name}, Каталог: {p.parent.name}",
+            existing_categories=cat_context,
         )
         if ai_result:
             info.ai_category = ai_result.get("category", "неразобранное")
@@ -279,6 +283,14 @@ class FileOrganizer:
                 os.makedirs(os.path.dirname(target), exist_ok=True)
                 shutil.move(info.original_path, target)
                 logger.info(f"-> {target}")
+
+                # Сохраняем в state
+                self.state.moved_files[info.original_path] = target
+                if info.ai_category:
+                    subs = self.state.categories.setdefault(info.ai_category, set())
+                    if info.ai_subcategory:
+                        subs.add(info.ai_subcategory)
+
                 moved += 1
             except Exception as e:
                 logger.error(f"Ошибка перемещения {info.filename}: {e}")
@@ -317,6 +329,9 @@ class FileOrganizer:
         if limit > 0:
             self.all_files = self.all_files[:limit]
             logger.info(f"Ограничение: обрабатываю {limit} файлов из {len(self.all_files)}")
+
+        # Загрузить существующие категории из state и отчёта
+        self._load_existing_categories()
 
         # 2. Анализ
         logger.info("Анализ файлов...")
@@ -359,6 +374,9 @@ class FileOrganizer:
         for cat, n in sorted(cats.items(), key=lambda x: -x[1]):
             logger.info(f"  {cat}: {n}")
 
+        # 8. Сохранение state
+        self.state.save()
+
         # 7. Перемещение
         logger.info("Перемещение...")
         self.move_files(dry_run=dry_run)
@@ -370,6 +388,78 @@ class FileOrganizer:
 
         logger.info(f"Ошибок: {len(self.errors)}")
         logger.info("Готово.")
+
+    def cleanup_moved_files(self, dry_run: bool = False):
+        """Удалить исходные файлы, которые уже перемещены (после подтверждения пользователя)."""
+        moved = self.state.moved_files
+        if not moved:
+            logger.info("Нет перемещённых файлов для очистки.")
+            return
+
+        # Проверяем, какие файлы ещё существуют в source
+        existing = []
+        for orig_path, target_path in moved.items():
+            if os.path.exists(orig_path):
+                exists_in_target = os.path.exists(target_path)
+                existing.append((orig_path, target_path, exists_in_target))
+
+        if not existing:
+            logger.info("Все исходные файлы уже удалены.")
+            return
+
+        logger.info(f"Найдено {len(existing)} исходных файлов для удаления:")
+        for orig, target, ok in existing:
+            status = "✓ целевой существует" if ok else "✗ целевой ОТСУТСТВУЕТ"
+            logger.info(f"  {status} — {Path(orig).name}")
+
+        if dry_run:
+            logger.info(f"[DRY-RUN] Удалил бы {len(existing)} файлов")
+            return
+
+        # Подтверждение
+        answer = input(f"\nУдалить {len(existing)} исходных файлов? [y/N]: ").strip().lower()
+        if answer not in ("y", "yes", "да"):
+            logger.info("Отмена.")
+            return
+
+        deleted = 0
+        for orig, target, ok in existing:
+            if not ok:
+                logger.error(f"  ПРОПУСК: {Path(orig).name} — целевой файл не найден!")
+                continue
+            try:
+                os.remove(orig)
+                deleted += 1
+                logger.info(f"  Удалён: {Path(orig).name}")
+            except Exception as e:
+                logger.error(f"  Ошибка удаления {orig}: {e}")
+
+        # Удаляем из state
+        for orig, target, ok in existing:
+            if ok:
+                self.state.moved_files.pop(orig, None)
+        self.state.save()
+        logger.info(f"Удалено файлов: {deleted}")
+
+    def _load_existing_categories(self):
+        """Загрузить уже существующие категории из state."""
+        for cat, subs in self.state.categories.items():
+            self.existing_categories.add(cat)
+            if subs:
+                self.existing_subcategories.setdefault(cat, set()).update(subs)
+
+    def _get_categories_context(self) -> str:
+        """Сформировать контекст с существующими категориями."""
+        if not self.existing_categories:
+            return ""
+        lines = ["\nУже существующие категории (используй их если подходят):"]
+        for cat in sorted(self.existing_categories):
+            subs = self.existing_subcategories.get(cat, set())
+            if subs:
+                lines.append(f"  - {cat}: {', '.join(sorted(subs))}")
+            else:
+                lines.append(f"  - {cat}")
+        return "\n".join(lines)
 
     def _save_report(self):
         report = {
@@ -403,6 +493,9 @@ def _safe_filename(name: str, ext: str) -> str:
     import re
     name = re.sub(r'[<>:"/\\|?*]', "_", name)
     name = re.sub(r"\s+", " ", name).strip()[:100]
+    # Убираем расширение если уже есть
+    if name.lower().endswith(f".{ext.lower()}"):
+        name = name[:-(len(ext) + 1)]
     return f"{name or 'unnamed'}.{ext}" if ext else (name or "unnamed")
 
 
@@ -419,6 +512,7 @@ def main():
     parser.add_argument("--first-level-only", action="store_true", help="Только файлы из корня source")
     parser.add_argument("--single-file", type=str, default="", help="Один конкретный файл для теста")
     parser.add_argument("--debug", action="store_true", help="DEBUG: логировать промпты и ответы AI")
+    parser.add_argument("--cleanup", action="store_true", help="Удалить исходные файлы после перемещения")
     args = parser.parse_args()
 
     if args.reset_state:
@@ -426,6 +520,11 @@ def main():
         if os.path.exists(state_path):
             os.remove(state_path)
             logger.info("State сброшен")
+
+    if args.cleanup:
+        organizer = FileOrganizer(args.source, args.target)
+        organizer.cleanup_moved_files(dry_run=args.dry_run)
+        return
 
     if args.debug:
         logging.getLogger().setLevel(logging.DEBUG)

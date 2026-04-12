@@ -112,6 +112,9 @@ class ProcessingState:
     """Состояние обработанных файлов (персистентное)."""
     processed_files: dict[str, dict] = field(default_factory=dict)  # hash -> info
     duplicates: dict[str, list[str]] = field(default_factory=dict)  # hash -> [paths]
+    categories: dict[str, set] = field(default_factory=dict)        # category -> {subcategories}
+    moved_files: dict[str, str] = field(default_factory=dict)       # original_path -> target_path
+    pending_deletes: list[str] = field(default_factory=list)        # файлы, готовые к удалению
     last_run: str = ""
     total_processed: int = 0
     total_duplicates_found: int = 0
@@ -133,6 +136,9 @@ class ProcessingState:
             "total_errors": self.total_errors,
             "files": self.processed_files,
             "duplicates": self.duplicates,
+            "categories": {k: list(v) for k, v in self.categories.items()},
+            "moved_files": self.moved_files,
+            "pending_deletes": self.pending_deletes,
         }
         with open(self.state_path, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
@@ -154,6 +160,12 @@ class ProcessingState:
             state.total_errors = data.get("total_errors", 0)
             state.processed_files = data.get("files", {})
             state.duplicates = data.get("duplicates", {})
+            # Категории и подкатегории
+            raw_cats = data.get("categories", {})
+            for cat, subs in raw_cats.items():
+                state.categories[cat] = set(subs) if isinstance(subs, list) else set()
+            state.moved_files = data.get("moved_files", {})
+            state.pending_deletes = data.get("pending_deletes", [])
         except Exception as e:
             print(f"Warning: could not load state: {e}")
         return state
