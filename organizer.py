@@ -23,6 +23,7 @@ from projects import find_project_root, is_build_artifact
 from archives import extract_archive
 from duplicates import detect_and_handle_duplicates
 from relationships import group_related_files
+from diagnostics import run_diagnostics
 
 logging.basicConfig(
     level=logging.INFO,
@@ -239,7 +240,15 @@ class FileOrganizer:
         logger.info(f"Перемещено: {moved}, пропущено: {skipped}")
 
     # ── Главный запуск ───────────────────────────
-    def run(self, dry_run: bool = False):
+    def run(self, dry_run: bool = False, skip_diagnostics: bool = False):
+        # ── Диагностика ──
+        if not skip_diagnostics:
+            diag = run_diagnostics()
+            print(diag.report())
+            if not diag.all_ok:
+                logger.warning("Не все зависимости доступны. Продолжаю на свой страх и риск...")
+                logger.warning("Или запустите: python -m diagnostics для подробностей")
+
         logger.info("=" * 60)
         logger.info(f"File Organizer | {'DRY-RUN' if dry_run else 'БОЕВОЙ'}")
         logger.info(f"Источник: {self.source}")
@@ -349,6 +358,7 @@ def main():
     parser.add_argument("--target", default=TARGET_DIR)
     parser.add_argument("--only-duplicates", action="store_true", help="Только дубликаты")
     parser.add_argument("--reset-state", action="store_true", help="Сбросить состояние")
+    parser.add_argument("--no-diagnostics", action="store_true", help="Пропустить диагностику")
     args = parser.parse_args()
 
     if args.reset_state:
@@ -358,7 +368,7 @@ def main():
             logger.info("State сброшен")
 
     organizer = FileOrganizer(args.source, args.target)
-    organizer.run(dry_run=args.dry_run)
+    organizer.run(dry_run=args.dry_run, skip_diagnostics=args.no_diagnostics)
 
 
 if __name__ == "__main__":
