@@ -417,6 +417,7 @@ def main():
     parser.add_argument("--no-diagnostics", action="store_true", help="Пропустить диагностику")
     parser.add_argument("--limit", type=int, default=0, help="Ограничить кол-во файлов (0 = все)")
     parser.add_argument("--first-level-only", action="store_true", help="Только файлы из корня source")
+    parser.add_argument("--single-file", type=str, default="", help="Один конкретный файл для теста")
     parser.add_argument("--debug", action="store_true", help="DEBUG: логировать промпты и ответы AI")
     args = parser.parse_args()
 
@@ -433,7 +434,12 @@ def main():
 
     organizer = FileOrganizer(args.source, args.target)
 
-    if args.first_level_only:
+    if args.single_file:
+        fp = os.path.abspath(os.path.expanduser(args.single_file))
+        organizer.all_files = [fp]
+        logger.info(f"Тест одного файла: {fp}")
+        organizer.run(dry_run=args.dry_run, skip_diagnostics=args.no_diagnostics)
+    elif args.first_level_only:
         # Только файлы из корня source
         source_resolved = str(Path(args.source).resolve())
         files = []

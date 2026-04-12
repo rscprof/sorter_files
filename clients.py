@@ -90,6 +90,14 @@ class LocalAIClient:
                 timeout=180,
             )
             resp.raise_for_status()
+
+            # RAW ответ до любой обработки
+            if DEBUG:
+                logger.debug("=" * 70)
+                logger.debug("RAW RESPONSE ← LocalAI:")
+                logger.debug(resp.text[:4000])
+                logger.debug("=" * 70)
+
             result = resp.json()
             content = result["choices"][0]["message"]["content"]
 
