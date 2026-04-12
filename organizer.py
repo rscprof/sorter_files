@@ -50,8 +50,8 @@ class FileOrganizer:
     # ── Шаг 1: Сбор ──────────────────────────────
     def collect_files(self) -> list[str]:
         files = []
-        for root, dirs, filenames in os.walk(self.source):
-            dirs[:] = [d for d in dirs if not d.startswith(".")]
+        source_resolved = str(Path(self.source).resolve())
+        for root, dirs, filenames in os.walk(source_resolved, followlinks=True):
             for fn in filenames:
                 fp = os.path.join(root, fn)
                 files.append(fp)
@@ -240,7 +240,7 @@ class FileOrganizer:
         logger.info(f"Перемещено: {moved}, пропущено: {skipped}")
 
     # ── Главный запуск ───────────────────────────
-    def run(self, dry_run: bool = False, skip_diagnostics: bool = False):
+    def run(self, dry_run: bool = False, skip_diagnostics: bool = False, limit: int = 0):
         # ── Диагностика ──
         if not skip_diagnostics:
             diag = run_diagnostics()
@@ -262,7 +262,13 @@ class FileOrganizer:
                 os.makedirs(d, exist_ok=True)
 
         # 1. Сбор
-        self.collect_files()
+        if not self.all_files:
+            self.collect_files()
+
+        # Ограничение
+        if limit > 0:
+            self.all_files = self.all_files[:limit]
+            logger.info(f"Ограничение: обрабатываю {limit} файлов из {len(self.all_files)}")
 
         # 2. Анализ
         logger.info("Анализ файлов...")
@@ -359,6 +365,8 @@ def main():
     parser.add_argument("--only-duplicates", action="store_true", help="Только дубликаты")
     parser.add_argument("--reset-state", action="store_true", help="Сбросить состояние")
     parser.add_argument("--no-diagnostics", action="store_true", help="Пропустить диагностику")
+    parser.add_argument("--limit", type=int, default=0, help="Ограничить кол-во файлов (0 = все)")
+    parser.add_argument("--first-level-only", action="store_true", help="Только файлы из корня source")
     args = parser.parse_args()
 
     if args.reset_state:
@@ -368,7 +376,21 @@ def main():
             logger.info("State сброшен")
 
     organizer = FileOrganizer(args.source, args.target)
-    organizer.run(dry_run=args.dry_run, skip_diagnostics=args.no_diagnostics)
+
+    if args.first_level_only:
+        # Только файлы из корня source
+        source_resolved = str(Path(args.source).resolve())
+        files = []
+        for entry in Path(source_resolved).iterdir():
+            if entry.is_file() or entry.is_symlink():
+                if entry.is_file():
+                    files.append(str(entry))
+        organizer.all_files = files[:args.limit] if args.limit else files
+        logger.info(f"Файлов первого уровня: {len(organizer.all_files)}")
+        organizer.run(dry_run=args.dry_run, skip_diagnostics=args.no_diagnostics)
+    else:
+        organizer.run(dry_run=args.dry_run, skip_diagnostics=args.no_diagnostics,
+                      limit=args.limit)
 
 
 if __name__ == "__main__":
