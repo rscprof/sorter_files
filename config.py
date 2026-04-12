@@ -39,3 +39,9 @@ PROJECT_INDICATORS = [
     "CMakeLists.txt", "Makefile", "Cargo.toml", "go.mod",
     "build.gradle", "pom.xml", ".git", ".gitignore", "Dockerfile",
 ]
+
+# Исключения — каталоги, которые НЕ считать корнем проекта
+PROJECT_EXCLUDE_DIRS = [
+    "html", "www", "var", "etc", "usr", "lib", "node_modules",
+    "vendor", "htdocs", "public_html",
+]

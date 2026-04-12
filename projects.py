@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 from typing import Optional
 
-from config import BUILD_ARTIFACT_PATTERNS, PROJECT_INDICATORS
+from config import BUILD_ARTIFACT_PATTERNS, PROJECT_INDICATORS, PROJECT_EXCLUDE_DIRS
 
 
 def is_project_directory(dirpath: str) -> bool:
@@ -28,8 +28,16 @@ def is_project_directory(dirpath: str) -> bool:
 
 def find_project_root(filepath: str, max_depth: int = 6) -> Optional[str]:
     """Найти корень проекта, поднимаясь вверх."""
+    source_root = None  # Запоминаем корень source, чтобы не выходить за него
     current = Path(filepath).resolve().parent
     for _ in range(max_depth):
+        # Не считаем системные/чужие каталоги проектами
+        if current.name.lower() in PROJECT_EXCLUDE_DIRS:
+            parent = current.parent
+            if parent == current:
+                break
+            current = parent
+            continue
         if is_project_directory(str(current)):
             return str(current)
         parent = current.parent

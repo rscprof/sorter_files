@@ -4,12 +4,17 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
+import os
 import re
 from typing import Optional
 
 import requests
 
 from config import LOCALAI_URL, LOCALAI_MODEL, SEARXNG_URL
+
+logger = logging.getLogger(__name__)
+DEBUG = os.getenv("DEBUG", "").lower() in ("1", "true", "yes")
 
 
 class LocalAIClient:
@@ -61,6 +66,18 @@ class LocalAIClient:
 
         messages.append({"role": "user", "content": user_content})
 
+        # DEBUG: логирование промпта
+        if DEBUG:
+            logger.debug("=" * 70)
+            logger.debug("PROMPT → LocalAI:")
+            if isinstance(user_content, str):
+                logger.debug(user_content[:2000])
+            else:
+                for part in user_content:
+                    if isinstance(part, dict) and part.get("type") == "text":
+                        logger.debug(part["text"][:2000])
+            logger.debug("=" * 70)
+
         try:
             resp = self.session.post(
                 f"{self.base_url}/chat/completions",
@@ -75,9 +92,17 @@ class LocalAIClient:
             resp.raise_for_status()
             result = resp.json()
             content = result["choices"][0]["message"]["content"]
+
+            # DEBUG: логирование ответа
+            if DEBUG:
+                logger.debug("=" * 70)
+                logger.debug("RESPONSE ← LocalAI:")
+                logger.debug(content[:2000])
+                logger.debug("=" * 70)
+
             return self._parse_json_response(content)
-        except Exception as e:
-            print(f"[LocalAI] Ошибка: {e}")
+        except requests.exceptions.Timeout:
+            print(f"[LocalAI] Таймаут (>90с), пропуск AI-анализа")
             return {}
 
     def _build_text_prompt(self, text: str, context: str) -> str:

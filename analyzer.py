@@ -48,12 +48,89 @@ def extract_text(filepath: str) -> str:
             with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
                 return f.read()[:5000]
 
+        # Office-файлы через python-docx / openpyxl / pptx
+        if ext == "docx":
+            return _extract_docx(filepath)
+        if ext == "xlsx":
+            return _extract_xlsx(filepath)
+        if ext == "pptx":
+            return _extract_pptx(filepath)
+
         if ext == "pdf":
             return _extract_pdf(filepath)
 
         return _quick_signature(filepath, ext)
     except Exception:
         return _quick_signature(filepath, ext)
+
+
+def _extract_docx(filepath: str) -> str:
+    """Текст из .docx."""
+    try:
+        import docx
+        doc = docx.Document(filepath)
+        return "\n".join(p.text for p in doc.paragraphs if p.text)[:5000]
+    except ImportError:
+        # Fallback: zip-распаковка
+        return _extract_office_text(filepath)
+    except Exception:
+        return _extract_office_text(filepath)
+
+
+def _extract_xlsx(filepath: str) -> str:
+    """Текст из .xlsx."""
+    try:
+        import openpyxl
+        wb = openpyxl.load_workbook(filepath, data_only=True)
+        texts = []
+        for ws in wb.worksheets:
+            for row in ws.iter_rows(values_only=True):
+                for cell in row:
+                    if cell is not None:
+                        texts.append(str(cell))
+        return "\n".join(texts)[:5000]
+    except ImportError:
+        return _extract_office_text(filepath)
+    except Exception:
+        return _extract_office_text(filepath)
+
+
+def _extract_pptx(filepath: str) -> str:
+    """Текст из .pptx."""
+    try:
+        from pptx import Presentation
+        prs = Presentation(filepath)
+        texts = []
+        for slide in prs.slides:
+            for shape in slide.shapes:
+                if shape.has_text_frame:
+                    for para in shape.text_frame.paragraphs:
+                        if para.text.strip():
+                            texts.append(para.text)
+        return "\n".join(texts)[:5000]
+    except ImportError:
+        return _extract_office_text(filepath)
+    except Exception:
+        return _extract_office_text(filepath)
+
+
+def _extract_office_text(filepath: str) -> str:
+    """Fallback: извлечь текст из Office XML внутри zip."""
+    import zipfile
+    try:
+        with zipfile.ZipFile(filepath) as zf:
+            text = ""
+            for name in zf.namelist():
+                if name.endswith(".xml") and "document" in name.lower():
+                    import re
+                    raw = zf.read(name).decode("utf-8", errors="ignore")
+                    # Убираем XML-теги, оставляем текст
+                    clean = re.sub(r"<[^>]+>", " ", raw)
+                    clean = re.sub(r"\s+", " ", clean).strip()
+                    text += clean + "\n"
+            return text[:5000] if text else _quick_signature(filepath, "office")
+    except Exception:
+        return _quick_signature(filepath, "office")
 
 
 def _extract_pdf(filepath: str) -> str:

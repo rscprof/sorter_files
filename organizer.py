@@ -417,6 +417,7 @@ def main():
     parser.add_argument("--no-diagnostics", action="store_true", help="Пропустить диагностику")
     parser.add_argument("--limit", type=int, default=0, help="Ограничить кол-во файлов (0 = все)")
     parser.add_argument("--first-level-only", action="store_true", help="Только файлы из корня source")
+    parser.add_argument("--debug", action="store_true", help="DEBUG: логировать промпты и ответы AI")
     args = parser.parse_args()
 
     if args.reset_state:
@@ -424,6 +425,11 @@ def main():
         if os.path.exists(state_path):
             os.remove(state_path)
             logger.info("State сброшен")
+
+    if args.debug:
+        logging.getLogger().setLevel(logging.DEBUG)
+        import clients
+        clients.DEBUG = True
 
     organizer = FileOrganizer(args.source, args.target)
 
