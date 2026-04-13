@@ -19,13 +19,12 @@ from config import (
 )
 from models import FileInfo, ImageMetadata, ProcessingState
 from clients import LocalAIClient, SearXNGClient
-from analyzer import compute_file_hash, extract_text, is_archive, is_executable, is_image, AUDIO_EXTS, pdf_to_images, image_to_jpeg
-from metadata import read_image_metadata, read_audio_metadata
-from projects import find_project_root, is_build_artifact
+from analyzer import compute_file_hash
 from archives import extract_archive
 from duplicates import detect_and_handle_duplicates
 from relationships import group_related_files
 from diagnostics import run_diagnostics
+from modules import get_analyzers
 
 logging.basicConfig(
     level=logging.INFO,
@@ -88,148 +87,40 @@ class FileOrganizer:
         logger.info(f"Найдено файлов: {len(files)}")
         return files
 
-    # ── Шаг 2: Анализ ────────────────────────────
+    # ── Шаг 2: Анализ через модульную систему ──
     def analyze_file(self, filepath: str) -> FileInfo:
+        """Анализ файла через систему модулей с priority order."""
+        from pathlib import Path
         p = Path(filepath)
+
+        # Базовая информация
+        import os
+        import mimetypes
         ext = p.suffix.lower().lstrip(".")
         size = os.path.getsize(filepath)
-        mime = _guess_mime(filepath)
+        mime, _ = mimetypes.guess_type(filepath)
 
-        info = FileInfo(
-            original_path=filepath,
-            filename=p.name,
-            extension=ext,
-            size=size,
-            mime_type=mime or "unknown",
-        )
+        # Контекст для модулей
+        context = {
+            "localai": self.localai,
+            "searxng": self.searxng,
+            "categories_context": self._get_categories_context(),
+        }
 
-        # Хеш
-        info.file_hash = compute_file_hash(filepath)
+        # Проходим по модулям в порядке приоритета
+        for analyzer_cls in get_analyzers():
+            analyzer = analyzer_cls()
+            if analyzer.can_handle(filepath):
+                logger.info(f"  → Модуль: {analyzer.name}")
+                info = analyzer.analyze(filepath, context)
+                if info:
+                    info.file_hash = compute_file_hash(filepath)
+                    return info
 
-        # Проект
-        proj_root = find_project_root(filepath)
-        if proj_root:
-            info.is_part_of_project = True
-            info.project_root = proj_root
-            if is_build_artifact(filepath, proj_root):
-                info.is_build_artifact = True
-                info.should_delete = True
-                info.ai_category = "build_artifact"
-                info.ai_description = f"Build-артефакт проекта {Path(proj_root).name}"
-                return info
-
-        # Очень большие файлы
-        if size > 500 * 1024 * 1024:
-            info.ai_category = "дистрибутив / образ"
-            info.ai_description = f"Очень большой файл ({size / (1024**3):.1f} GB)"
-            return info
-
-        # Архив
-        if is_archive(filepath):
-            info.is_archive = True
-            info.ai_category = "архив"
-            info.ai_description = f"Архив {ext}"
-            return info
-
-        # Исполняемый / дистрибутив
-        if is_executable(filepath) or ext == "iso":
-            info.ai_category = "дистрибутив"
-            info.is_distributable = self.searxng.is_known_distributable(p.name)
-            info.should_delete = info.is_distributable
-            return info
-
-        # Изображение — метаданные + AI
-        if is_image(filepath):
-            info.image_metadata = read_image_metadata(filepath)
-
-        # Аудио — метаданные + транскрипция через whisper
-        is_audio = ext in AUDIO_EXTS
-        if is_audio:
-            info.audio_metadata = read_audio_metadata(filepath)
-            logger.info(f"  → Транскрипция аудио (whisperx-tiny)...")
-            transcript = self.localai.transcribe_audio(filepath)
-            info.audio_transcript = transcript
-            logger.info(f"  ← Транскрипт: {len(transcript)} символов")
-
-        # AI-анализ (текст и/или изображение)
-        text = extract_text(filepath)
-
-        # Для аудио используем транскрипт вместо «[OGG файл, ...]»
-        is_audio = ext in AUDIO_EXTS
-        ai_text = text if (text and not text.startswith("[")) else ""
-        if is_audio and info.audio_transcript:
-            ai_text = info.audio_transcript
-
-        # PDF без текста — конвертируем в изображения и разбираем мультимодально
-        pdf_images = []
-        use_pdf_images = False
-        if ext == "pdf" and (not ai_text or len(ai_text) < 50):
-            logger.info(f"  → PDF без текста, конвертирую в JPEG...")
-            pdf_images = pdf_to_images(filepath, max_pages=3)
-            if pdf_images:
-                logger.info(f"  ← Создано {len(pdf_images)} JPEG, отправляю мультимодально (OCR)")
-                use_pdf_images = True
-                ai_text = ""  # Пусть AI смотрит только на картинки и распознаёт текст
-
-        # Изображения не-JPEG — конвертируем в JPEG для модели
-        temp_jpeg_path = ""
-        image_for_ai = ""
-        if is_image(filepath):
-            ext_lower = ext.lower()
-            if ext_lower in ("jpg", "jpeg"):
-                image_for_ai = filepath
-            else:
-                logger.info(f"  → Конвертация {ext.upper()} → JPEG...")
-                temp_jpeg_path = image_to_jpeg(filepath)
-                image_for_ai = temp_jpeg_path
-                if temp_jpeg_path != filepath:
-                    logger.info(f"  ← Готово: {Path(temp_jpeg_path).name}")
-
-        cat_context = self._get_categories_context()
-        ai_result = self.localai.analyze_content(
-            text_content=ai_text,
-            image_path=image_for_ai if is_image(filepath) else (pdf_images[0] if use_pdf_images else ""),
-            file_context=f"Имя: {p.name}, Каталог: {p.parent.name}",
-            existing_categories=cat_context,
-            is_pdf_scan=use_pdf_images,
-        )
-
-        # Очищаем временные файлы
-        import os as _os
-        for img in pdf_images:
-            try:
-                _os.remove(img)
-            except Exception:
-                pass
-        if temp_jpeg_path and temp_jpeg_path != filepath:
-            try:
-                _os.remove(temp_jpeg_path)
-            except Exception:
-                pass
-
-        if ai_result:
-            info.ai_category = ai_result.get("category", "неразобранное")
-            info.ai_subcategory = ai_result.get("subcategory", "")
-            info.ai_suggested_name = ai_result.get("suggested_name", "")
-            info.ai_description = ai_result.get("description", "")
-            info.ai_reasoning = ai_result.get("reasoning", "")
-            info.is_distributable = ai_result.get("is_distributable", False)
-        else:
-            # AI не ответил — fallback
-            if is_audio:
-                info.ai_category = "Аудио"
-                if info.audio_metadata:
-                    info.ai_description = info.audio_metadata.summary()
-                else:
-                    info.ai_description = f"Аудио {ext.upper()}"
-            elif ext == "pdf":
-                info.ai_category = "PDF (скан)"
-                info.ai_description = "PDF без текста и без ответа AI"
-            else:
-                info.ai_category = "Неразобранное"
-                info.ai_description = f"AI не ответил ({ext})"
-
-        return info
+        # Не должно произойти (fallback всегда срабатывает)
+        from modules.fallback import FallbackAnalyzer
+        fb = FallbackAnalyzer()
+        return fb.analyze(filepath, context)
 
     # ── Шаг 3: Дубликаты ─────────────────────────
     def handle_duplicates(self):

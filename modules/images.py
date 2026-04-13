@@ -1,0 +1,83 @@
+"""Модуль: изображения (приоритет 60)."""
+
+from __future__ import annotations
+
+import logging
+import os
+from typing import Optional
+
+from modules.base import BaseAnalyzer
+from models import FileInfo
+from analyzer import is_image, image_to_jpeg
+from metadata import read_image_metadata
+
+logger = logging.getLogger(__name__)
+
+
+class ImagesAnalyzer(BaseAnalyzer):
+    """Изображения: EXIF → конвертация в JPEG → мультимодальный AI."""
+
+    @property
+    def priority(self) -> int:
+        return 60
+
+    @property
+    def name(self) -> str:
+        return "images"
+
+    def can_handle(self, filepath: str) -> bool:
+        return is_image(filepath)
+
+    def analyze(self, filepath: str, existing_context: dict) -> Optional[FileInfo]:
+        localai = existing_context.get("localai")
+        existing_categories = existing_context.get("categories_context", "")
+        from pathlib import Path
+        p = Path(filepath)
+
+        info = self._make_info(filepath)
+        info.image_metadata = read_image_metadata(filepath)
+
+        if not localai:
+            info.ai_category = "Изображения"
+            info.ai_description = "Изображение, AI недоступен"
+            return info
+
+        # Конвертация в JPEG если нужно
+        temp_jpeg_path = ""
+        image_for_ai = filepath
+        ext_lower = info.extension.lower()
+        if ext_lower not in ("jpg", "jpeg"):
+            logger.info(f"  → Конвертация {ext_lower.upper()} → JPEG...")
+            temp_jpeg_path = image_to_jpeg(filepath)
+            image_for_ai = temp_jpeg_path
+            if temp_jpeg_path != filepath:
+                logger.info(f"  ← Готово: {Path(temp_jpeg_path).name}")
+
+        # AI-анализ
+        context = f"Имя: {p.name}, Каталог: {p.parent.name}"
+        ai_result = localai.analyze_content(
+            text_content="",
+            image_path=image_for_ai,
+            file_context=context,
+            existing_categories=existing_categories,
+        )
+
+        # Очистка временного JPEG
+        if temp_jpeg_path and temp_jpeg_path != filepath:
+            try:
+                os.remove(temp_jpeg_path)
+            except Exception:
+                pass
+
+        if ai_result:
+            info.ai_category = ai_result.get("category", "Изображения")
+            info.ai_subcategory = ai_result.get("subcategory", "")
+            info.ai_suggested_name = ai_result.get("suggested_name", "")
+            info.ai_description = ai_result.get("description", "")
+            info.ai_reasoning = ai_result.get("reasoning", "")
+            info.is_distributable = ai_result.get("is_distributable", False)
+        else:
+            info.ai_category = "Изображения"
+            info.ai_description = "Изображение без ответа AI"
+
+        return info
