@@ -742,6 +742,11 @@ def main():
             os.remove(state_path)
             logger.info("State сброшен")
 
+    # DEBUG — ДО reprocess/cleanup, иначе return пропустит
+    import clients
+    if args.debug:
+        clients.DEBUG = True
+
     if args.reprocess:
         # Собираем файлы из organized/ для повторной обработки
         organizer = FileOrganizer(args.source, args.target)
@@ -771,11 +776,6 @@ def main():
         organizer = FileOrganizer(args.source, args.target)
         organizer.cleanup_moved_files(dry_run=args.dry_run)
         return
-
-    if args.debug:
-        logging.getLogger().setLevel(logging.DEBUG)
-        import clients
-        clients.DEBUG = True
 
     organizer = FileOrganizer(args.source, args.target)
 

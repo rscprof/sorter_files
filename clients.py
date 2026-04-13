@@ -82,15 +82,15 @@ class LocalAIClient:
 
         # DEBUG: логирование промпта
         if DEBUG:
-            logger.debug("=" * 70)
-            logger.debug("PROMPT → LocalAI:")
+            print(f"\n{'='*70}")
+            print(f"PROMPT → LocalAI (model={active_model}):")
             if isinstance(user_content, str):
-                logger.debug(user_content[:2000])
+                print(user_content[:3000])
             else:
                 for part in user_content:
                     if isinstance(part, dict) and part.get("type") == "text":
-                        logger.debug(part["text"][:2000])
-            logger.debug("=" * 70)
+                        print(part["text"][:3000])
+            print(f"{'='*70}\n")
 
         try:
             logger.info(f"  → Запрос к LocalAI (model={active_model}, timeout=600s)...")
@@ -109,20 +109,20 @@ class LocalAIClient:
 
             # RAW ответ до любой обработки
             if DEBUG:
-                logger.debug("=" * 70)
-                logger.debug("RAW RESPONSE ← LocalAI:")
-                logger.debug(resp.text[:4000])
-                logger.debug("=" * 70)
+                print(f"\n{'='*70}")
+                print(f"RAW RESPONSE ← LocalAI:")
+                print(resp.text[:4000])
+                print(f"{'='*70}\n")
 
             result = resp.json()
             content = result["choices"][0]["message"]["content"]
 
-            # DEBUG: логирование ответа
+            # DEBUG: распарсенный ответ
             if DEBUG:
-                logger.debug("=" * 70)
-                logger.debug("RESPONSE ← LocalAI:")
-                logger.debug(content[:2000])
-                logger.debug("=" * 70)
+                print(f"\n{'='*70}")
+                print(f"PARSED RESPONSE ← LocalAI:")
+                print(content[:2000])
+                print(f"{'='*70}\n")
 
             return self._parse_json_response(content)
         except Exception as e:
