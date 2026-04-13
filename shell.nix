@@ -18,6 +18,7 @@ pkgs.mkShell {
     rar             # unrar (unfree)
     file            # libmagic
     exiftool        # EXIF-парсер
+    ffmpeg          # ffprobe для аудио-метаданных
 
     # Git
     git

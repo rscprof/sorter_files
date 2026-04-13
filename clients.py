@@ -114,6 +114,30 @@ class LocalAIClient:
             print(f"[LocalAI] Ошибка: {e}")
             return {}
 
+    def transcribe_audio(self, filepath: str, model: str = "whisperx-tiny") -> str:
+        """Транскрибировать аудио через Whisper-модель в LocalAI."""
+        import os
+        try:
+            fname = os.path.basename(filepath)
+            with open(filepath, "rb") as f:
+                files = {"file": (fname, f, "application/octet-stream")}
+                data = {"model": model}
+                resp = self.session.post(
+                    f"{self.base_url}/audio/transcriptions",
+                    files=files,
+                    data=data,
+                    timeout=300,
+                )
+                resp.raise_for_status()
+                result = resp.json()
+                return result.get("text", "")
+        except requests.exceptions.Timeout:
+            print(f"[LocalAI] Таймаут транскрипции {filepath}")
+            return ""
+        except Exception as e:
+            print(f"[LocalAI] Ошибка транскрипции {filepath}: {e}")
+            return ""
+
     def _build_text_prompt(self, text: str, context: str, existing_categories: str = "") -> str:
         cats = existing_categories + "\n" if existing_categories else ""
         return f"""Проанализируй содержимое файла.

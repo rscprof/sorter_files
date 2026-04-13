@@ -11,6 +11,9 @@ from pathlib import Path
 from config import ARCHIVE_EXTS, EXECUTABLE_EXTS, IMAGE_EXTS
 
 
+AUDIO_EXTS = {"ogg", "mp3", "wav", "flac", "aac", "wma", "m4a", "opus", "aiff"}
+
+
 def compute_file_hash(filepath: str, max_size: int = 100 * 1024 * 1024) -> str:
     """SHA-256 хеш. Для больших файлов — partial hash."""
     h = hashlib.sha256()

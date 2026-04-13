@@ -17,8 +17,8 @@ from config import (
 )
 from models import FileInfo, ImageMetadata, ProcessingState
 from clients import LocalAIClient, SearXNGClient
-from analyzer import compute_file_hash, extract_text, is_archive, is_executable, is_image
-from metadata import read_image_metadata
+from analyzer import compute_file_hash, extract_text, is_archive, is_executable, is_image, AUDIO_EXTS
+from metadata import read_image_metadata, read_audio_metadata
 from projects import find_project_root, is_build_artifact
 from archives import extract_archive
 from duplicates import detect_and_handle_duplicates
@@ -115,11 +115,25 @@ class FileOrganizer:
         if is_image(filepath):
             info.image_metadata = read_image_metadata(filepath)
 
+        # Аудио — метаданные + транскрипция через whisper
+        is_audio = ext in AUDIO_EXTS
+        if is_audio:
+            info.audio_metadata = read_audio_metadata(filepath)
+            logger.info(f"  → Транскрипция аудио (whisperx-tiny)...")
+            transcript = self.localai.transcribe_audio(filepath)
+            info.audio_transcript = transcript
+            logger.info(f"  ← Транскрипт: {len(transcript)} символов")
+
         # AI-анализ (текст и/или изображение)
         text = extract_text(filepath)
+        # Для аудио используем транскрипт вместо «[OGG файл, ...]»
+        ai_text = text if (text and not text.startswith("[")) else ""
+        if is_audio and info.audio_transcript:
+            ai_text = info.audio_transcript
+
         cat_context = self._get_categories_context()
         ai_result = self.localai.analyze_content(
-            text_content=text,
+            text_content=ai_text,
             image_path=filepath if is_image(filepath) else "",
             file_context=f"Имя: {p.name}, Каталог: {p.parent.name}",
             existing_categories=cat_context,
@@ -131,6 +145,17 @@ class FileOrganizer:
             info.ai_description = ai_result.get("description", "")
             info.ai_reasoning = ai_result.get("reasoning", "")
             info.is_distributable = ai_result.get("is_distributable", False)
+        else:
+            # AI не ответил — fallback
+            if is_audio:
+                info.ai_category = "Аудио"
+                if info.audio_metadata:
+                    info.ai_description = info.audio_metadata.summary()
+                else:
+                    info.ai_description = f"Аудио {ext.upper()}"
+            else:
+                info.ai_category = "Неразобранное"
+                info.ai_description = f"AI не ответил ({ext})"
 
         return info
 
@@ -213,6 +238,23 @@ class FileOrganizer:
                 parts.append(f"GPS {md.latitude:.4f}, {md.longitude:.4f}")
             if parts:
                 logger.info(f"{prefix}📷 EXIF: {', '.join(parts)}")
+        if info.audio_metadata:
+            md = info.audio_metadata
+            parts = []
+            if md.title:
+                parts.append(f"«{md.title}»")
+            if md.artist:
+                parts.append(md.artist)
+            if md.duration_seconds:
+                mins = int(md.duration_seconds // 60)
+                secs = int(md.duration_seconds % 60)
+                parts.append(f"[{mins}:{secs:02d}]")
+            if md.genre:
+                parts.append(f"жанр: {md.genre}")
+            if parts:
+                logger.info(f"{prefix}🎵 {', '.join(parts)}")
+            if info.audio_transcript:
+                logger.info(f"{prefix}🎤 Транскрипт: {info.audio_transcript[:200]}")
         target = self.determine_target_path(info)
         if dry_run:
             logger.info(f"{prefix}└─ ▶ {target}")
@@ -493,9 +535,13 @@ def _safe_filename(name: str, ext: str) -> str:
     import re
     name = re.sub(r'[<>:"/\\|?*]', "_", name)
     name = re.sub(r"\s+", " ", name).strip()[:100]
-    # Убираем расширение если уже есть
+    # Убираем расширение если AI уже его добавил
     if name.lower().endswith(f".{ext.lower()}"):
         name = name[:-(len(ext) + 1)]
+    # Также убираем если AI вернул имя с другим расширением того же типа
+    for alt_ext in (ext,):
+        if name.lower().endswith(f".{alt_ext.lower()}"):
+            name = name[:-(len(alt_ext) + 1)]
     return f"{name or 'unnamed'}.{ext}" if ext else (name or "unnamed")
 
 

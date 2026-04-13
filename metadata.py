@@ -1,4 +1,4 @@
-"""EXIF-метаданные изображений."""
+"""EXIF-метаданные изображений и аудио-теги."""
 
 from __future__ import annotations
 
@@ -8,6 +8,68 @@ from pathlib import Path
 from typing import Optional
 
 from models import ImageMetadata
+
+
+@dataclass
+class AudioMetadata:
+    """Метаданные аудиофайла."""
+    title: str = ""
+    artist: str = ""
+    album: str = ""
+    genre: str = ""
+    duration_seconds: float = 0
+    track_number: int = 0
+    year: int = 0
+    comment: str = ""
+    has_speech: bool = False  # распознаваем через whisper
+
+    def summary(self) -> str:
+        parts = []
+        if self.title:
+            parts.append(self.title)
+        if self.artist:
+            parts.append(self.artist)
+        if self.album:
+            parts.append(f"({self.album})")
+        if self.duration_seconds:
+            mins = int(self.duration_seconds // 60)
+            secs = int(self.duration_seconds % 60)
+            parts.append(f"[{mins}:{secs:02d}]")
+        if self.genre:
+            parts.append(f"жанр: {self.genre}")
+        return " ".join(parts)
+
+
+def read_audio_metadata(filepath: str) -> "AudioMetadata":
+    """Извлечь метаданные из аудиофайла через ffprobe."""
+    import subprocess
+    import json
+    meta = AudioMetadata()
+    meta.filename_hint = Path(filepath).name
+    try:
+        result = subprocess.run(
+            [
+                "ffprobe", "-v", "quiet", "-print_format", "json",
+                "-show_format", filepath
+            ],
+            capture_output=True, text=True, timeout=30,
+        )
+        if result.returncode == 0:
+            data = json.loads(result.stdout)
+            fmt = data.get("format", {})
+            meta.duration_seconds = float(fmt.get("duration", 0))
+            tags = fmt.get("tags", {})
+            meta.title = tags.get("title", "")
+            meta.artist = tags.get("artist", "")
+            meta.album = tags.get("album", "")
+            meta.genre = tags.get("genre", "")
+            meta.comment = tags.get("comment", "")
+            date_str = tags.get("date", "")
+            if date_str and date_str[:4].isdigit():
+                meta.year = int(date_str[:4])
+    except Exception:
+        pass
+    return meta
 
 
 def read_image_metadata(filepath: str) -> Optional[ImageMetadata]:

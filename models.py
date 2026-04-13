@@ -7,9 +7,12 @@ import json
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from datetime import datetime
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 
 from config import STATE_DIR
+
+if TYPE_CHECKING:
+    from metadata import ImageMetadata, AudioMetadata
 
 
 @dataclass
@@ -93,7 +96,11 @@ class FileInfo:
     project_root: str = ""
 
     # Метаданные для фото
-    image_metadata: Optional[ImageMetadata] = None
+    image_metadata: Optional["ImageMetadata"] = None
+
+    # Метаданные для аудио
+    audio_metadata: Optional["AudioMetadata"] = None
+    audio_transcript: str = ""
 
     # Решение
     should_delete: bool = False
