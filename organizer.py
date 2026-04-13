@@ -342,11 +342,23 @@ class FileOrganizer:
 
         parts.append(safe_name)
 
-        # Избегаем коллизий
+        # Разрешаем коллизии: если файл уже существует, добавляем _номер
         target = os.path.join(*parts)
         if os.path.exists(target):
-            ts = int(datetime.now().timestamp())
-            target = str(Path(target).parent / f"{Path(target).stem}_{ts}{Path(target).suffix}")
+            # При reprocess — если это тот же самый файл, не переименовываем
+            if os.path.abspath(target) == os.path.abspath(info.original_path):
+                info.target_path = target
+                return target
+
+            # Иначе — ищем свободное имя с _номер
+            stem = Path(target).stem
+            ext = Path(target).suffix
+            parent = Path(target).parent
+            counter = 1
+            while os.path.exists(target):
+                target = str(parent / f"{stem}_{counter}{ext}")
+                counter += 1
+            logger.info(f"  │ ⚠️ Коллизия имён -> {Path(target).name}")
 
         info.target_path = target
         return target
