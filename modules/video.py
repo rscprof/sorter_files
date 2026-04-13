@@ -96,10 +96,11 @@ class VideoAnalyzer(BaseAnalyzer):
                 file_context=context_text,
                 existing_categories=existing_categories,
             )
-            # Очистка временных кадров
-            for f in frames:
+            # Очистка временных кадров и каталога
+            import shutil
+            if frames:
                 try:
-                    os.remove(f)
+                    shutil.rmtree(os.path.dirname(frames[0]), ignore_errors=True)
                 except Exception:
                     pass
 
@@ -111,7 +112,7 @@ class VideoAnalyzer(BaseAnalyzer):
         # 4. Речь (Whisper, первые 60 сек) → Mini-модель
         if has_audio and duration > 5:
             logger.info(f"  → Транскрипция аудио (первые 60с, whisperx-tiny)...")
-            transcript = self._transcribe_audio(filepath, duration=60)
+            transcript = self._transcribe_audio(filepath, localai, duration=60)
             if transcript and len(transcript) > 30:
                 logger.info(f"  ← Транскрипт: {len(transcript)} символов")
                 ai_result_audio = localai.analyze_content(
@@ -168,40 +169,53 @@ class VideoAnalyzer(BaseAnalyzer):
         return result
 
     def _extract_keyframes(self, filepath: str, num_frames: int = 2) -> list[str]:
-        """Извлечь ключевые кадры из видео."""
+        """Извлечь ключевые кадры из видео.
+        
+        Возвращает пути к временным файлам. Вызывающий ОБЯЗАН их удалить.
+        Каталог НЕ удаляется автоматически.
+        """
         frames = []
+        tmpdir = None
         try:
-            duration = self._probe_video(filepath).get("duration", 0)
+            probe = self._probe_video(filepath)
+            duration = probe.get("duration", 0)
             if duration < 2:
                 return frames
 
-            with tempfile.TemporaryDirectory(prefix="vid_frames_") as tmpdir:
-                # Извлекаем кадды в 10% и 50% длительности
-                timestamps = []
-                if num_frames >= 1:
-                    timestamps.append(max(1, duration * 0.1))
-                if num_frames >= 2:
-                    timestamps.append(duration * 0.5)
-                if num_frames >= 3:
-                    timestamps.append(duration * 0.9)
+            # Создаём временный каталог вручную (не TemporaryDirectory)
+            import tempfile
+            tmpdir = tempfile.mkdtemp(prefix="vid_frames_")
 
-                for i, ts in enumerate(timestamps):
-                    out = os.path.join(tmpdir, f"frame_{i:02d}.jpg")
-                    r = subprocess.run(
-                        ["ffmpeg", "-y", "-ss", str(ts), "-i", filepath,
-                         "-frames:v", "1", "-q:v", "3", "-update", "1", out],
-                        capture_output=True, text=True, timeout=30,
-                    )
-                    if r.returncode == 0 and os.path.exists(out) and os.path.getsize(out) > 100:
-                        frames.append(out)
+            # Извлекаем кадры в 10% и 50% длительности
+            timestamps = []
+            if num_frames >= 1:
+                timestamps.append(max(1, duration * 0.1))
+            if num_frames >= 2:
+                timestamps.append(duration * 0.5)
+            if num_frames >= 3:
+                timestamps.append(duration * 0.9)
+
+            for i, ts in enumerate(timestamps):
+                out = os.path.join(tmpdir, f"frame_{i:02d}.jpg")
+                r = subprocess.run(
+                    ["ffmpeg", "-y", "-ss", str(ts), "-i", filepath,
+                     "-frames:v", "1", "-q:v", "3", "-update", "1", out],
+                    capture_output=True, text=True, timeout=30,
+                )
+                if r.returncode == 0 and os.path.exists(out) and os.path.getsize(out) > 100:
+                    frames.append(out)
         except Exception as e:
             logger.debug(f"keyframes error: {e}")
+            if tmpdir:
+                import shutil
+                shutil.rmtree(tmpdir, ignore_errors=True)
         return frames
 
-    def _transcribe_audio(self, filepath: str, duration: int = 60) -> str:
+    def _transcribe_audio(self, filepath: str, localai, duration: int = 60) -> str:
         """Транскрибировать первые N секунд аудио через whisper."""
-        import tempfile
+        tmp_audio = None
         try:
+            import tempfile
             with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
                 tmp_audio = tmp.name
 
@@ -214,13 +228,15 @@ class VideoAnalyzer(BaseAnalyzer):
             if r.returncode != 0 or not os.path.exists(tmp_audio):
                 return ""
 
-            from clients import LocalAIClient
-            from config import LOCALAI_URL
-            ai = LocalAIClient(base_url=LOCALAI_URL)
-            transcript = ai.transcribe_audio(tmp_audio)
+            transcript = localai.transcribe_audio(tmp_audio)
 
-            os.unlink(tmp_audio)
             return transcript
         except Exception as e:
             logger.debug(f"transcribe error: {e}")
             return ""
+        finally:
+            if tmp_audio and os.path.exists(tmp_audio):
+                try:
+                    os.unlink(tmp_audio)
+                except Exception:
+                    pass
