@@ -89,10 +89,11 @@ class FileOrganizer:
     def collect_files(self) -> list[str]:
         files = []
         source_resolved = str(Path(self.source).resolve())
+        target_resolved = str(Path(self.target).resolve()) if self.target_inside_source else None
+
         for root, dirs, filenames in os.walk(source_resolved, followlinks=True):
             # Исключаем target, если он внутри source
-            if self.target_inside_source:
-                target_resolved = str(Path(self.target).resolve())
+            if target_resolved:
                 dirs[:] = [d for d in dirs if os.path.join(root, d) != target_resolved
                            and not os.path.join(root, d).startswith(target_resolved + os.sep)]
             for fn in filenames:
@@ -100,6 +101,37 @@ class FileOrganizer:
                 files.append(fp)
         self.all_files = files
         logger.info(f"Найдено файлов: {len(files)}")
+        return files
+
+    def collect_files_limited(self, limit: int, dry_run: bool = False) -> list[str]:
+        """Собрать файлы, остановившись при достижении лимита.
+        
+        Быстрее, чем collect_files + срез, потому что не обходит всё дерево.
+        Также пропускает уже обработанные файлы по хешу.
+        """
+        files = []
+        source_resolved = str(Path(self.source).resolve())
+        target_resolved = str(Path(self.target).resolve()) if self.target_inside_source else None
+
+        for root, dirs, filenames in os.walk(source_resolved, followlinks=True):
+            if target_resolved:
+                dirs[:] = [d for d in dirs if os.path.join(root, d) != target_resolved
+                           and not os.path.join(root, d).startswith(target_resolved + os.sep)]
+            for fn in filenames:
+                fp = os.path.join(root, fn)
+                # Пропускаем уже обработанные
+                if not dry_run:
+                    fh = compute_file_hash(fp)
+                    if self.state.is_already_processed(fh):
+                        continue
+                files.append(fp)
+                if len(files) >= limit:
+                    self.all_files = files
+                    logger.info(f"Собрано {len(files)} файлов для обработки (лимит {limit})")
+                    return files
+
+        self.all_files = files
+        logger.info(f"Найдено файлов для обработки: {len(files)}")
         return files
 
     # ── Шаг 2: Анализ через модульную систему ──
@@ -463,23 +495,19 @@ class FileOrganizer:
 
         # 1. Сбор файлов
         if not self.all_files:
-            self.collect_files()
+            if limit > 0:
+                self.collect_files_limited(limit, dry_run=dry_run)
+            else:
+                self.collect_files()
 
-        # Фильтрация уже обработанных (по хешу)
-        pending = []
-        skipped_count = 0
-        for fp in self.all_files:
-            fh = compute_file_hash(fp)
-            if self.state.is_already_processed(fh) and not dry_run:
-                skipped_count += 1
-                continue
-            pending.append(fp)
+        # Для full scan (без limit) — дополнительная фильтрация
+        if limit == 0:
+            pending = [fp for fp in self.all_files
+                       if dry_run or not self.state.is_already_processed(compute_file_hash(fp))]
+        else:
+            pending = list(self.all_files)
 
-        if limit > 0:
-            pending = pending[:limit]
-
-        logger.info(f"Всего файлов: {len(self.all_files)}, уже обработано: {skipped_count}, "
-                     f"к обработке: {len(pending)}")
+        logger.info(f"Всего найдено: {len(self.all_files)}, к обработке: {len(pending)}")
 
         # 2. Загрузка категорий из state + сканирование target
         self._load_existing_categories()
