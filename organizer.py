@@ -26,6 +26,7 @@ from duplicates import detect_and_handle_duplicates
 from relationships import group_related_files
 from diagnostics import run_diagnostics
 from modules import get_analyzers
+from projects import find_project_root, is_build_artifact, is_project_directory, get_directory_listing
 
 logging.basicConfig(
     level=logging.INFO,
@@ -442,6 +443,50 @@ class FileOrganizer:
 
         logger.info(f"Индекс дубликатов: {len(self._hash_index)} файлов")
 
+    def _analyze_directories(self, dry_run: bool = False):
+        """Найти каталоги в source и проанализировать их как проекты."""
+        source_resolved = str(Path(self.source).resolve())
+        target_resolved = str(Path(self.target).resolve()) if self.target_inside_source else None
+
+        # Собираем каталоги первого уровня
+        dirs_to_analyze = []
+        try:
+            for entry in Path(source_resolved).iterdir():
+                if entry.is_dir(follow_symlinks=True):
+                    # Исключаем target
+                    if target_resolved and str(entry.resolve()).startswith(target_resolved):
+                        continue
+                    # Исключаем скрытые
+                    if entry.name.startswith("_"):
+                        continue
+                    dirs_to_analyze.append(str(entry))
+        except Exception as e:
+            logger.debug(f"Error scanning dirs: {e}")
+
+        if not dirs_to_analyze:
+            return
+
+        logger.info(f"Анализ {len(dirs_to_analyze)} каталогов на наличие проектов...")
+
+        for dirpath in dirs_to_analyze:
+            # Проверяем есть ли уже обработанные файлы из этого каталога
+            has_processed = False
+            for h, info in self.state.processed_files.items():
+                orig = info.get("original_path", "")
+                if orig.startswith(dirpath + os.sep):
+                    has_processed = True
+                    break
+            if has_processed:
+                logger.info(f"  ⏭ {Path(dirpath).name} — уже обработан")
+                continue
+
+            # Проверяем есть ли indicators проекта
+            if is_project_directory(dirpath):
+                logger.info(f"  📁 {Path(dirpath).name} — найден проект")
+                self._analyze_and_handle_directory(dirpath, dry_run=dry_run)
+            else:
+                logger.debug(f"  📁 {Path(dirpath).name} — не похоже на проект")
+
     def _scan_existing_categories(self):
         """Сканировать target-каталог и восстановить категории из существующих файлов."""
         if not self.target.exists():
@@ -462,6 +507,114 @@ class FileOrganizer:
             dirs[:] = [d for d in dirs if not d.startswith("_")]
         if self.existing_categories:
             logger.info(f"Найдено существующих категорий: {len(self.existing_categories)}")
+
+    def _analyze_and_handle_directory(self, dirpath: str, dry_run: bool = False) -> list[FileInfo]:
+        """
+        Проанализировать каталог через AI и обработать как проект.
+        
+        Возвращает список FileInfo для файлов которые надо обработать отдельно.
+        """
+        from pathlib import Path
+        p = Path(dirpath)
+        results = []
+
+        # Получаем структуру каталога
+        listing = get_directory_listing(dirpath, max_depth=2, max_entries=60)
+        logger.info(f"  📂 Структура каталога:")
+        for line in listing.split("\n")[:15]:
+            logger.info(f"  │   {line}")
+        if len(listing.split("\n")) > 15:
+            logger.info(f"  │   ... и ещё {len(listing.split(chr(10))) - 15} строк")
+
+        # Анализируем через AI
+        analysis = self.localai.analyze_directory(listing, str(dirpath))
+        if not analysis:
+            logger.info(f"  ⚠ AI не смог проанализировать каталог")
+            return results
+
+        is_project = analysis.get("is_project", False)
+        project_name = analysis.get("project_name", p.name)
+        project_type = analysis.get("project_type", "")
+        files_to_delete = analysis.get("files_to_delete", [])
+        reasoning = analysis.get("reasoning", "")
+
+        logger.info(f"  🤖 AI: проект={is_project}, тип={project_type}, имя={project_name}")
+        logger.info(f"  🗑  На удаление: {files_to_delete}")
+        logger.info(f"  💬 {reasoning}")
+
+        if not is_project:
+            logger.info(f"  │ Не проект — обрабатываю файлы внутри по одному")
+            return results  # Файлы обработаются отдельно
+
+        # Это проект — копируем как целое
+        safe_name = _safe_name(project_name or p.name)
+        project_target = os.path.join(self.target, "Проекты", safe_name)
+
+        if dry_run:
+            logger.info(f"  │ [DRY] Копирование проекта -> {project_target}")
+            return results
+
+        # Создаём целевой каталог
+        os.makedirs(project_target, exist_ok=True)
+
+        # Копируем файлы, исключая файлы на удаление
+        import shutil as sh
+        copied = 0
+        deleted = 0
+        for root, dirs, files in os.walk(dirpath):
+            rel_root = os.path.relpath(root, dirpath)
+            target_root = os.path.join(project_target, rel_root) if rel_root != "." else project_target
+            os.makedirs(target_root, exist_ok=True)
+
+            for fn in files:
+                src = os.path.join(root, fn)
+                rel_path = os.path.relpath(src, dirpath)
+
+                # Проверяем надо ли удалять
+                should_del = any(
+                    del_pattern in rel_path or del_pattern == fn
+                    for del_pattern in files_to_delete
+                )
+                if should_del:
+                    logger.info(f"  │ 🗑  {rel_path} → на удаление")
+                    deleted += 1
+                    continue
+
+                dst = os.path.join(target_root, fn)
+                sh.copy2(src, dst)
+                copied += 1
+
+        logger.info(f"  ✅ Проект скопирован: {copied} файлов, {deleted} удалено -> {project_target}")
+
+        # Помечаем все файлы проекта как обработанные
+        for root, dirs, files in os.walk(dirpath):
+            for fn in files:
+                fp = os.path.join(root, fn)
+                rel_path = os.path.relpath(fp, dirpath)
+                should_del = any(
+                    del_pattern in rel_path or del_pattern == fn
+                    for del_pattern in files_to_delete
+                )
+                h = compute_file_hash(fp)
+                if not should_del:
+                    fi = FileInfo(
+                        original_path=fp,
+                        filename=fn,
+                        extension=Path(fn).suffix.lstrip("."),
+                        size=os.path.getsize(fp),
+                        file_hash=h,
+                        ai_category="Проекты",
+                        ai_subcategory=project_type or project_name,
+                        ai_suggested_name=project_name,
+                        ai_description=f"Файл проекта '{project_name}' ({project_type})",
+                        target_path=os.path.join(project_target, rel_path),
+                    )
+                    self.state.mark_processed(fi)
+                    self.state.moved_files[fp] = fi.target_path
+                    results.append(fi)
+
+        self.state.save()
+        return results
 
     def _move_single_file(self, info: FileInfo, dry_run: bool) -> bool:
         """Переместить один файл сразу после анализа."""
@@ -526,6 +679,9 @@ class FileOrganizer:
             else:
                 self.collect_files()
 
+        # 1.5. Анализ каталогов как проектов (до обработки файлов)
+        self._analyze_directories(dry_run=dry_run)
+
         # Для full scan (без limit) — дополнительная фильтрация
         if limit == 0:
             pending = [fp for fp in self.all_files
@@ -546,12 +702,14 @@ class FileOrganizer:
         # 3. Обработка каждого файла (анализ → перемещение сразу)
         logger.info("Начинаю обработку...")
         processed_count = 0
+        total = len(pending)
         for i, fp in enumerate(pending):
             if self._stop_requested:
                 logger.info(f"⏹ Остановка по запросу. Обработано {processed_count} файлов.")
                 break
 
-            logger.info(f"  [{i+1}/{len(pending)}] 📄 {Path(fp).name}")
+            # Показываем номер ДО начала работы
+            logger.info(f"  ── [{i+1}/{total}] ── {Path(fp).name}")
             try:
                 # Проверка дубликата по хешу
                 fp_hash = compute_file_hash(fp)

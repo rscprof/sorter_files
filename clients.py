@@ -81,6 +81,61 @@ class LocalAIClient:
             print(f"[VL Model] Ошибка описания изображения: {e}")
             return ""
 
+    def analyze_directory(self, dir_listing: str, dir_path: str = "") -> dict:
+        """
+        Проанализировать содержимое каталога.
+        Возвращает: is_project (bool), project_name (str), 
+                    files_to_delete (list), reasoning (str)
+        """
+        prompt = f"""Проанализируй содержимое каталога и ответь в JSON:
+{{
+  "is_project": true/false,
+  "project_type": "тип проекта (web-app, python-lib, college-course, etc) или null",
+  "project_name": "понятное имя проекта или null",
+  "files_to_delete": ["список файлов/каталогов которые можно удалить — автогенерированные, node_modules, build, dist, __pycache__, стандартная инфраструктура и т.д."],
+  "important_files": ["список важных файлов которые надо сохранить"],
+  "reasoning": "краткое обоснование"
+}}
+
+Содержимое каталога:
+{dir_listing}
+
+Отвечай ТОЛЬКО валидным JSON."""
+
+        try:
+            if DEBUG:
+                print(f"\n{'='*70}")
+                print(f"DIRECTORY ANALYSIS (model={self.text_model}):")
+                print(dir_listing[:1000])
+                print(f"{'='*70}\n")
+
+            resp = self.session.post(
+                f"{self.base_url}/chat/completions",
+                json={
+                    "model": self.text_model,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "temperature": 0.1,
+                    "max_tokens": 1024,
+                },
+                timeout=120,
+            )
+            resp.raise_for_status()
+            result = resp.json()
+            content = result["choices"][0]["message"]["content"].strip()
+
+            # Парсим JSON
+            import re
+            json_match = re.search(r"\{[\s\S]*\}", content)
+            if json_match:
+                data = json.loads(json_match.group())
+                if DEBUG:
+                    print(f"DIR ANALYSIS RESULT: {json.dumps(data, indent=2, ensure_ascii=False)}")
+                return data
+            return {}
+        except Exception as e:
+            print(f"[Directory Analysis] Ошибка: {e}")
+            return {}
+
     def analyze_content(self, text_content: str = "", image_path: str = "",
                         file_context: str = "", existing_categories: str = "",
                         is_pdf_scan: bool = False) -> dict:

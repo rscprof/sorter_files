@@ -81,3 +81,52 @@ def is_build_artifact(filepath: str, project_root: str = "") -> bool:
             return True
 
     return False
+
+
+def get_directory_listing(dirpath: str, max_depth: int = 2, max_entries: int = 50) -> str:
+    """Получить структуру каталога в текстовом виде."""
+    lines = []
+    dirpath = os.path.abspath(dirpath)
+    base = dirpath.rstrip("/")
+    depth = base.count("/") + 1
+
+    try:
+        entries = sorted(os.listdir(dirpath))
+    except OSError:
+        return f"[недоступно: {dirpath}]"
+
+    for entry in entries[:max_entries]:
+        full = os.path.join(dirpath, entry)
+        rel = os.path.relpath(full, base)
+        if os.path.isdir(full):
+            lines.append(f"📁 {rel}/")
+            # Подкаталоги первого уровня
+            if rel.count("/") < max_depth - 1:
+                try:
+                    sub = sorted(os.listdir(full))[:20]
+                    for s in sub:
+                        sf = os.path.join(full, s)
+                        sub_rel = os.path.relpath(sf, base)
+                        if os.path.isdir(sf):
+                            lines.append(f"  📁 {sub_rel}/")
+                        else:
+                            sz = os.path.getsize(sf)
+                            lines.append(f"  📄 {sub_rel} ({_human_size(sz)})")
+                except OSError:
+                    pass
+        else:
+            sz = os.path.getsize(full)
+            lines.append(f"📄 {rel} ({_human_size(sz)})")
+
+    if len(entries) > max_entries:
+        lines.append(f"... и ещё {len(entries) - max_entries} записей")
+
+    return "\n".join(lines)
+
+
+def _human_size(n: int) -> str:
+    for unit in ("B", "KB", "MB", "GB"):
+        if n < 1024:
+            return f"{n:.0f}{unit}"
+        n /= 1024
+    return f"{n:.1f}TB"
