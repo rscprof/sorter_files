@@ -151,26 +151,62 @@ class FileOrganizer:
                         f.original_path for f in group if f != fi
                     ]
 
-    # ── Шаг 5: Архивы ────────────────────────────
-    def process_archives(self, dry_run: bool = False):
-        archives = [fi for fi in self.file_infos if fi.is_archive]
-        for info in archives:
-            extract_dir = os.path.join(ARCHIVE_DIR, Path(info.original_path).stem)
-            logger.info(f"Распаковка: {info.filename}")
-            if dry_run:
-                logger.info(f"  [DRY] -> {extract_dir}")
+    # ── Шаг 5: Обработка содержимого архива ─────
+    def _process_archive_contents(self, archive_info: FileInfo, dry_run: bool = False):
+        """Распаковать архив и обработить каждый файл по полной цепочке."""
+        p = Path(archive_info.original_path)
+        extract_dir = os.path.join(ARCHIVE_DIR, p.stem)
+
+        logger.info(f"  │ 📦 Распаковка архива...")
+        if dry_run:
+            logger.info(f"  │ [DRY] Распаковка -> {extract_dir}")
+            return
+
+        extracted = extract_archive(archive_info.original_path, extract_dir)
+        if not extracted:
+            logger.info(f"  │ ⚠️ Не удалось распаковать {archive_info.filename}")
+            self.errors.append(f"Не распакован: {archive_info.filename}")
+            # Перемещаем сам архив
+            self._move_single_file(archive_info, dry_run=dry_run)
+            return
+
+        logger.info(f"  │ 📦 Распаковано {len(extracted)} файлов, обрабатываю...")
+
+        # Обрабатываем каждый распакованный файл по полной цепочке
+        for ef in extracted:
+            fp = os.path.join(extract_dir, ef)
+            if not os.path.isfile(fp):
                 continue
-            extracted = extract_archive(info.original_path, extract_dir)
-            if extracted:
-                logger.info(f"  Распаковано: {len(extracted)} файлов")
-                # Анализируем содержимое
-                for ef in extracted:
-                    fp = os.path.join(extract_dir, ef)
-                    if os.path.isfile(fp):
-                        ei = self.analyze_file(fp)
-                        self.file_infos.append(ei)
-            else:
-                self.errors.append(f"Не распакован: {info.original_path}")
+
+            # Проверяем дубликаты: 1) hash-index, 2) в organized, 3) в state
+            fp_hash = compute_file_hash(fp)
+            if fp_hash in self._hash_index:
+                dup_path = self._hash_index[fp_hash]
+                logger.info(f"  │ ⏭ {Path(fp).name} — дубликат {Path(dup_path).name}")
+                continue
+            if self.state.is_already_processed(fp_hash):
+                prev = self.state.get_processed_info(fp_hash)
+                if prev and prev.get("target_path"):
+                    logger.info(f"  │ ⏭ {Path(fp).name} — уже обработан")
+                    continue
+
+            try:
+                logger.info(f"  │   └─ 📄 {Path(fp).name}")
+                ei = self.analyze_file(fp)
+                self.file_infos.append(ei)
+                self._print_decision(ei, dry_run=dry_run)
+
+                # Рекурсивно: если вложенный архив — распаковать и его
+                if ei.is_archive:
+                    self._process_archive_contents(ei, dry_run=dry_run)
+                else:
+                    self._move_single_file(ei, dry_run=dry_run)
+            except Exception as e:
+                logger.error(f"  │   ✗ Ошибка обработки {fp}: {e}")
+                self.errors.append(str(e))
+
+        # Перемещаем сам архив после обработки содержимого
+        self._move_single_file(archive_info, dry_run=dry_run)
 
     # ── Шаг 6: Перемещение ───────────────────────
     def _print_decision(self, info: FileInfo, dry_run: bool = False):
@@ -322,6 +358,32 @@ class FileOrganizer:
 
         logger.info(f"Перемещено: {moved}, пропущено: {skipped}")
 
+    def _find_duplicate_in_organized(self, file_hash: str) -> Optional[str]:
+        """Найти файл с таким же хешом в organized/ (уже организованные)."""
+        if not self.target.exists():
+            return None
+        # Сканируем только организованные файлы (не служебные каталоги)
+        for root, dirs, files in os.walk(self.target):
+            rel = os.path.relpath(root, self.target)
+            if rel.startswith("_"):
+                dirs.clear()
+                continue
+            for fn in files:
+                fp = os.path.join(root, fn)
+                if compute_file_hash(fp) == file_hash:
+                    return fp
+        return None
+
+    def _build_hash_index(self):
+        """Построить индекс хешей всех уже организованных файлов."""
+        self._hash_index: dict[str, str] = {}  # hash -> target_path
+        for orig, target in self.state.moved_files.items():
+            if os.path.exists(target):
+                h = compute_file_hash(target)
+                if h:
+                    self._hash_index[h] = target
+        logger.info(f"Индекс дубликатов: {len(self._hash_index)} файлов")
+
     def _scan_existing_categories(self):
         """Сканировать target-каталог и восстановить категории из существующих файлов."""
         if not self.target.exists():
@@ -364,6 +426,10 @@ class FileOrganizer:
                 if info.ai_subcategory:
                     subs.add(info.ai_subcategory)
             self.state.save()
+
+            # Обновляем индекс дубликатов
+            if info.file_hash:
+                self._hash_index[info.file_hash] = target
 
             logger.info(f"  │ ✅ -> {target}")
             return True
@@ -419,6 +485,10 @@ class FileOrganizer:
         self._load_existing_categories()
         self._scan_existing_categories()
 
+        # 2.5. Построить индекс хешей для дубликатов
+        self._hash_index: dict[str, str] = {}
+        self._build_hash_index()
+
         # 3. Обработка каждого файла (анализ → перемещение сразу)
         logger.info("Начинаю обработку...")
         processed_count = 0
@@ -429,12 +499,24 @@ class FileOrganizer:
 
             logger.info(f"  [{i+1}/{len(pending)}] 📄 {Path(fp).name}")
             try:
+                # Проверка дубликата по хешу
+                fp_hash = compute_file_hash(fp)
+                if fp_hash in self._hash_index:
+                    dup_path = self._hash_index[fp_hash]
+                    logger.info(f"  │ ⏭ Дубликат {Path(dup_path).name} — пропускаю")
+                    continue
+
                 info = self.analyze_file(fp)
                 self.file_infos.append(info)
                 self._print_decision(info, dry_run=dry_run)
 
-                # Перемещаем сразу после анализа
-                self._move_single_file(info, dry_run=dry_run)
+                # Если архив — распаковать и обработать содержимое
+                if info.is_archive:
+                    self._process_archive_contents(info, dry_run=dry_run)
+                else:
+                    # Перемещаем сразу после анализа
+                    self._move_single_file(info, dry_run=dry_run)
+
                 processed_count += 1
 
             except Exception as e:
