@@ -11,7 +11,7 @@ from typing import Optional
 
 import requests
 
-from config import LOCALAI_URL, LOCALAI_MODEL, SEARXNG_URL
+from config import LOCALAI_URL, LOCALAI_MODEL, LOCALAI_TEXT_MODEL, SEARXNG_URL
 
 logger = logging.getLogger(__name__)
 DEBUG = os.getenv("DEBUG", "").lower() in ("1", "true", "yes")
@@ -20,9 +20,12 @@ DEBUG = os.getenv("DEBUG", "").lower() in ("1", "true", "yes")
 class LocalAIClient:
     """Клиент для LocalAI (текст + мультимодальный анализ)."""
 
-    def __init__(self, base_url: str = LOCALAI_URL, model: str = LOCALAI_MODEL):
+    def __init__(self, base_url: str = LOCALAI_URL,
+                 model: str = LOCALAI_MODEL,
+                 text_model: str = LOCALAI_TEXT_MODEL):
         self.base_url = base_url.rstrip("/")
-        self.model = model
+        self.model = model  # мультимодальная (изображения)
+        self.text_model = text_model  # только текст (быстрее)
         self.session = requests.Session()
         self.session.timeout = 180
 
@@ -32,6 +35,9 @@ class LocalAIClient:
         """
         Универсальный анализ: текст, изображение или оба.
         is_pdf_scan=True — PDF-скан: нужно распознать текст (OCR) и классифицировать.
+        
+        Текстовые запросы идут на text_model (быстрее),
+        мультимодальные — на model (мультимодальная).
         """
         messages = []
 
@@ -54,6 +60,10 @@ class LocalAIClient:
             ),
         }
         messages.append(system_msg)
+
+        # Определяем какая модель нужна
+        has_image = bool(image_path)
+        active_model = self.model if has_image else self.text_model
 
         # Формируем контент
         if image_path and text_content:
@@ -83,11 +93,11 @@ class LocalAIClient:
             logger.debug("=" * 70)
 
         try:
-            logger.info(f"  → Запрос к LocalAI (model={self.model}, timeout=600s)...")
+            logger.info(f"  → Запрос к LocalAI (model={active_model}, timeout=600s)...")
             resp = self.session.post(
                 f"{self.base_url}/chat/completions",
                 json={
-                    "model": self.model,
+                    "model": active_model,
                     "messages": messages,
                     "temperature": 0.15,
                     "max_tokens": 4096,

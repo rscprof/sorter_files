@@ -19,6 +19,7 @@ from modules.build_artifacts import BuildArtifactsAnalyzer
 from modules.distributables import DistributablesAnalyzer
 from modules.archives import ArchivesAnalyzer
 from modules.audio import AudioAnalyzer
+from modules.video import VideoAnalyzer
 from modules.pdf_scans import PdfScansAnalyzer
 from modules.images import ImagesAnalyzer
 from modules.documents import DocumentsAnalyzer
@@ -27,14 +28,15 @@ from modules.fallback import FallbackAnalyzer
 # Все анализаторы, отсортированные по приоритету
 ANALYZERS: list[type[BaseAnalyzer]] = sorted(
     [
-        BuildArtifactsAnalyzer,
-        DistributablesAnalyzer,
-        ArchivesAnalyzer,
-        AudioAnalyzer,
-        PdfScansAnalyzer,
-        ImagesAnalyzer,
-        DocumentsAnalyzer,
-        FallbackAnalyzer,
+        BuildArtifactsAnalyzer,     # 10
+        DistributablesAnalyzer,     # 20
+        ArchivesAnalyzer,           # 30
+        AudioAnalyzer,              # 40
+        VideoAnalyzer,              # 45
+        PdfScansAnalyzer,           # 50
+        ImagesAnalyzer,             # 60
+        DocumentsAnalyzer,          # 70
+        FallbackAnalyzer,           # 999
     ],
     key=lambda cls: cls().priority,
 )

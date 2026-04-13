@@ -409,11 +409,25 @@ class FileOrganizer:
     def _build_hash_index(self):
         """Построить индекс хешей всех уже организованных файлов."""
         self._hash_index: dict[str, str] = {}  # hash -> target_path
-        for orig, target in self.state.moved_files.items():
-            if os.path.exists(target):
-                h = compute_file_hash(target)
-                if h:
-                    self._hash_index[h] = target
+
+        # Сканируем organized/ — всегда, для актуальности
+        if self.target.exists():
+            logger.info(f"Сканирую organized/ для индекса дубликатов...")
+            count = 0
+            for root, dirs, files in os.walk(self.target):
+                rel = os.path.relpath(root, self.target)
+                if rel.startswith("_"):
+                    dirs.clear()
+                    continue
+                for fn in files:
+                    fp = os.path.join(root, fn)
+                    h = compute_file_hash(fp)
+                    if h:
+                        self._hash_index[h] = fp
+                        count += 1
+                dirs[:] = [d for d in dirs if not d.startswith("_")]
+            logger.info(f"  найдено: {count} файлов")
+
         logger.info(f"Индекс дубликатов: {len(self._hash_index)} файлов")
 
     def _scan_existing_categories(self):
@@ -707,6 +721,7 @@ def main():
     parser.add_argument("--single-file", type=str, default="", help="Один конкретный файл для теста")
     parser.add_argument("--debug", action="store_true", help="DEBUG: логировать промпты и ответы AI")
     parser.add_argument("--cleanup", action="store_true", help="Удалить исходные файлы после перемещения")
+    parser.add_argument("--reprocess", action="store_true", help="Повторно обработать уже перемещённые файлы")
     args = parser.parse_args()
 
     if args.reset_state:
@@ -714,6 +729,26 @@ def main():
         if os.path.exists(state_path):
             os.remove(state_path)
             logger.info("State сброшен")
+
+    if args.reprocess:
+        # Собираем файлы из organized/ для повторной обработки
+        organizer = FileOrganizer(args.source, args.target)
+        organized_files = []
+        for root, dirs, files in os.walk(organizer.target):
+            rel = os.path.relpath(root, organizer.target)
+            if rel.startswith("_"):
+                dirs.clear()
+                continue
+            for fn in files:
+                organized_files.append(os.path.join(root, fn))
+            dirs[:] = [d for d in dirs if not d.startswith("_")]
+        organizer.all_files = organized_files[:args.limit] if args.limit else organized_files
+        logger.info(f"Reprocess: {len(organizer.all_files)} файлов из organized/")
+        # Очищаем state для этих файлов
+        organizer.state = ProcessingState()
+        organizer._hash_index = {}
+        organizer.run(dry_run=args.dry_run, skip_diagnostics=args.no_diagnostics)
+        return
 
     if args.cleanup:
         organizer = FileOrganizer(args.source, args.target)
