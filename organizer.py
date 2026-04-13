@@ -746,20 +746,25 @@ def main():
         # Собираем файлы из organized/ для повторной обработки
         organizer = FileOrganizer(args.source, args.target)
         organized_files = []
+        exclude_exts = {".json", ".log", ".md", ".txt"}
         for root, dirs, files in os.walk(organizer.target):
             rel = os.path.relpath(root, organizer.target)
             if rel.startswith("_"):
                 dirs.clear()
                 continue
             for fn in files:
+                if Path(fn).suffix.lower() in exclude_exts:
+                    continue
                 organized_files.append(os.path.join(root, fn))
             dirs[:] = [d for d in dirs if not d.startswith("_")]
         organizer.all_files = organized_files[:args.limit] if args.limit else organized_files
         logger.info(f"Reprocess: {len(organizer.all_files)} файлов из organized/")
-        # Очищаем state для этих файлов
+        # Очищаем state и индекс дубликатов
         organizer.state = ProcessingState()
         organizer._hash_index = {}
-        organizer.run(dry_run=args.dry_run, skip_diagnostics=args.no_diagnostics)
+        # Переопределяем _build_hash_index чтобы не сканировал organized/ при reprocess
+        organizer._build_hash_index = lambda: logger.info("Индекс дубликатов: отключён (reprocess)")
+        organizer.run(dry_run=args.dry_run, skip_diagnostics=args.no_diagnostics, limit=0)
         return
 
     if args.cleanup:
