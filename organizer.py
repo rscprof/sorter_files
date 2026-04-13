@@ -107,13 +107,12 @@ class FileOrganizer:
         """Анализ файла через систему модулей с priority order."""
         from pathlib import Path
         p = Path(filepath)
-
-        # Базовая информация
-        import os
-        import mimetypes
         ext = p.suffix.lower().lstrip(".")
         size = os.path.getsize(filepath)
-        mime, _ = mimetypes.guess_type(filepath)
+
+        # Показываем тип файла сразу
+        size_str = _human_size_short(size)
+        logger.info(f"  │ 📂 Тип: {ext.upper()} | 📏 {size_str}")
 
         # Контекст для модулей
         context = {
@@ -324,15 +323,8 @@ class FileOrganizer:
         logger.info(f"Перемещено: {moved}, пропущено: {skipped}")
 
     def _scan_existing_categories(self):
-        """Сканировать target-каталог и восстановить категории из существующих файлов.
-        
-        Если target внутри source — не сканируем, чтобы не перепутать
-        ещё необработанные файлы с уже организованными.
-        """
+        """Сканировать target-каталог и восстановить категории из существующих файлов."""
         if not self.target.exists():
-            return
-        if self.target_inside_source:
-            logger.info("Target внутри source — пропускаю сканирование категорий")
             return
         for root, dirs, files in os.walk(self.target):
             # Пропускаем служебные каталоги
@@ -435,7 +427,7 @@ class FileOrganizer:
                 logger.info(f"⏹ Остановка по запросу. Обработано {processed_count} файлов.")
                 break
 
-            logger.info(f"[{i+1}/{len(pending)}] {Path(fp).name}")
+            logger.info(f"  [{i+1}/{len(pending)}] 📄 {Path(fp).name}")
             try:
                 info = self.analyze_file(fp)
                 self.file_infos.append(info)
@@ -460,18 +452,14 @@ class FileOrganizer:
             logger.info(f"  {cat}: {n}")
 
         self.state.save()
-        logger.info(f"Ошибок: {len(self.errors)}")
         if self._stop_requested:
             logger.info("⏹ Остановлено пользователем/state сохранён")
-        logger.info("Готово.")
-
-        # 8. Сохранение state
-        if not dry_run:
-            self.state.save()
-            self._save_report()
-
         logger.info(f"Ошибок: {len(self.errors)}")
         logger.info("Готово.")
+
+        # Отчёт
+        if not dry_run:
+            self._save_report()
 
     def cleanup_moved_files(self, dry_run: bool = False):
         """Удалить исходные файлы, которые уже перемещены (после подтверждения пользователя)."""
@@ -561,6 +549,14 @@ class FileOrganizer:
 
 
 # ── Утилиты ──────────────────────────────────────
+def _human_size_short(n: int) -> str:
+    for unit in ("B", "KB", "MB", "GB"):
+        if n < 1024:
+            return f"{n:.0f}{unit}"
+        n /= 1024
+    return f"{n:.1f}TB"
+
+
 def _guess_mime(filepath: str) -> str:
     mime, _ = __import__("mimetypes").guess_type(filepath)
     return mime or ""
