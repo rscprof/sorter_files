@@ -12,6 +12,7 @@ from datetime import datetime
 from pathlib import Path
 
 import signal
+import time
 
 from config import (
     SOURCE_DIR, TARGET_DIR, DELETE_DIR, ARCHIVE_DIR,
@@ -50,14 +51,28 @@ class FileOrganizer:
         self.existing_categories: set[str] = set()
         self.existing_subcategories: dict[str, set[str]] = {}  # category -> {subcategories}
         self._stop_requested = False
+        self._signal_count = 0
+        self._last_signal_time = 0.0
 
         # Graceful shutdown
         signal.signal(signal.SIGINT, self._handle_signal)
         signal.signal(signal.SIGTERM, self._handle_signal)
 
     def _handle_signal(self, signum, frame):
+        now = time.time()
+        self._signal_count += 1
+
+        if self._signal_count >= 2 and (now - self._last_signal_time) < 2.0:
+            # Второй сигнал в течение 2 секунд — немедленный выход
+            logger.info("\n⚡ Повторный сигнал! Немедленное завершение...")
+            self.state.save()
+            import sys
+            sys.exit(1)
+
+        self._last_signal_time = now
         sig_name = "SIGINT (Ctrl-C)" if signum == signal.SIGINT else "SIGTERM (systemd stop)"
         logger.info(f"\n⚠️  Получен {sig_name}. Завершаю после текущего файла...")
+        logger.info(f"     Повторите сигнал в течение 2 секунд для немедленного выхода.")
         self._stop_requested = True
 
     @property

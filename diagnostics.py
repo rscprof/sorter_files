@@ -51,18 +51,35 @@ def run_diagnostics() -> Diagnostics:
     diag = Diagnostics()
 
     # ── HTTP-сервисы ──
-    diag.add(
-        "LocalAI",
-        *_check_http(LOCALAI_URL, "LocalAI"),
-    )
-    diag.add(
-        f"  модель {LOCALAI_MODEL}",
-        *_check_model_available(LOCALAI_MODEL),
-    )
-    diag.add(
-        "SearXNG",
-        *_check_http(SEARXNG_URL, "SearXNG"),
-    )
+    # LocalAI: проверяем /v1/models напрямую
+    try:
+        r = requests.get(f"{LOCALAI_URL.rstrip('/')}/models", timeout=10)
+        if r.status_code == 200:
+            diag.add("LocalAI", True, "API доступен")
+            diag.add(
+                f"  модель {LOCALAI_MODEL}",
+                *_check_model_available(LOCALAI_MODEL),
+            )
+        else:
+            diag.add("LocalAI", False, f"HTTP {r.status_code}")
+    except Exception as e:
+        diag.add("LocalAI", False, str(e)[:100])
+
+    # SearXNG: проверяем реальный поиск
+    try:
+        r = requests.get(
+            f"{SEARXNG_URL.rstrip('/')}/search",
+            params={"q": "test", "format": "json"},
+            timeout=10,
+        )
+        if r.status_code == 200:
+            data = r.json()
+            n = len(data.get("results", []))
+            diag.add("SearXNG", True, f"{n} результатов на 'test'")
+        else:
+            diag.add("SearXNG", False, f"HTTP {r.status_code}")
+    except Exception as e:
+        diag.add("SearXNG", False, str(e)[:100])
 
     # ── Системные утилиты ──
     for tool in ("pdftotext", "7z", "unrar", "tar"):
@@ -76,9 +93,10 @@ def run_diagnostics() -> Diagnostics:
 
 
 def _check_http(url: str, name: str) -> tuple[bool, str]:
+    """Проверка HTTP-сервиса. Только 200 = OK."""
     try:
         r = requests.get(url.rstrip("/") + "/health" if "searx" not in url.lower() else url, timeout=10)
-        if r.status_code < 500:
+        if r.status_code == 200:
             return True, f"HTTP {r.status_code}"
         return False, f"HTTP {r.status_code}"
     except Exception as e:
