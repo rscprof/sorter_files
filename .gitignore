@@ -1,6 +1,30 @@
+# Virtual environment
+.venv/
+
+# Python cache
 __pycache__/
 *.pyc
+*.pyo
+*.egg-info/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+
+# Local configuration (contains your actual settings)
+config.local.json
+
+# State and logs
+state.json
+organizer.log
 *.log
+
+# Generated reports
 organizer_report.json
-.venv/
-result.json
+
+# Build artifacts
+dist/
+build/
+
+# OS files
+.DS_Store
+Thumbs.db

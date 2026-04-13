@@ -8,10 +8,8 @@ import os
 import subprocess
 from pathlib import Path
 
-from config import ARCHIVE_EXTS, EXECUTABLE_EXTS, IMAGE_EXTS, TEMP_FILE_PATTERNS
+from config import ARCHIVE_EXTS, EXECUTABLE_EXTS, IMAGE_EXTS, TEMP_FILE_PATTERNS, AUDIO_EXTS
 
-
-AUDIO_EXTS = {"ogg", "mp3", "wav", "flac", "aac", "wma", "m4a", "opus", "aiff"}
 
 # Форматы, которые модель НЕ принимает — надо конвертировать в JPEG
 NON_NATIVE_IMAGE_EXTS = {"webp", "bmp", "tiff", "tif", "heic", "heif", "raw", "cr2", "nef", "arw", "svg"}

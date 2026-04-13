@@ -1,0 +1,26 @@
+{
+    "_comment": "Example configuration. Copy to config.local.json and edit values.",
+
+    "language": "en",
+
+    "localai": {
+        "url": "http://localhost:11434/v1",
+        "model": "qwen3.5-35b-a3b-apex",
+        "text_model": "Qwen3.5-35B-A3B-APEX-Mini.gguf",
+        "vl_model": "qwen3-vl-4b-instruct",
+        "timeout": 600,
+        "max_tokens": 4096,
+        "temperature": 0.15
+    },
+
+    "searxng": {
+        "url": "http://localhost:8080"
+    },
+
+    "paths": {
+        "source": "~/my_files",
+        "target": "~/organized"
+    },
+
+    "state_dir": "~/.local/state/file-organizer"
+}
