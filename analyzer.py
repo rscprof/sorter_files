@@ -252,8 +252,18 @@ def image_to_jpeg(filepath: str, quality: int = 85) -> str:
         from PIL import Image
         tmp_path = filepath + ".converted.jpg"
         img = Image.open(filepath)
-        # HEIC/HEIF могут быть в режиме CMYK — конвертируем
-        if img.mode in ("RGBA", "P", "LA"):
+        # HEIC/HEIF/RGBA — конвертируем в RGB для JPEG
+        if img.mode in ("RGBA", "P", "LA", "PA", "RGBa", "La"):
+            # Создаём белый фон для прозрачных изображений
+            background = Image.new("RGB", img.size, (255, 255, 255))
+            if img.mode == "P":
+                img = img.convert("RGBA")
+            if "A" in img.mode:
+                background.paste(img, mask=img.split()[-1])
+            else:
+                background.paste(img)
+            img = background
+        elif img.mode != "RGB":
             img = img.convert("RGB")
         img.save(tmp_path, "JPEG", quality=quality)
         return tmp_path

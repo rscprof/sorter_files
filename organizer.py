@@ -11,6 +11,8 @@ import shutil
 from datetime import datetime
 from pathlib import Path
 
+import signal
+
 from config import (
     SOURCE_DIR, TARGET_DIR, DELETE_DIR, ARCHIVE_DIR,
     UNKNOWN_DIR, BUILD_ARTIFACTS_DIR, STATE_DIR,
@@ -48,12 +50,37 @@ class FileOrganizer:
         self.errors: list[str] = []
         self.existing_categories: set[str] = set()
         self.existing_subcategories: dict[str, set[str]] = {}  # category -> {subcategories}
+        self._stop_requested = False
+
+        # Graceful shutdown
+        signal.signal(signal.SIGINT, self._handle_signal)
+        signal.signal(signal.SIGTERM, self._handle_signal)
+
+    def _handle_signal(self, signum, frame):
+        sig_name = "SIGINT (Ctrl-C)" if signum == signal.SIGINT else "SIGTERM (systemd stop)"
+        logger.info(f"\n⚠️  Получен {sig_name}. Завершаю после текущего файла...")
+        self._stop_requested = True
+
+    @property
+    def target_inside_source(self) -> bool:
+        """Target находится внутри source — нужно исключить его из обхода."""
+        try:
+            src = str(Path(self.source).resolve())
+            tgt = str(Path(self.target).resolve())
+            return tgt.startswith(src + os.sep) or tgt == src
+        except Exception:
+            return False
 
     # ── Шаг 1: Сбор ──────────────────────────────
     def collect_files(self) -> list[str]:
         files = []
         source_resolved = str(Path(self.source).resolve())
         for root, dirs, filenames in os.walk(source_resolved, followlinks=True):
+            # Исключаем target, если он внутри source
+            if self.target_inside_source:
+                target_resolved = str(Path(self.target).resolve())
+                dirs[:] = [d for d in dirs if os.path.join(root, d) != target_resolved
+                           and not os.path.join(root, d).startswith(target_resolved + os.sep)]
             for fn in filenames:
                 fp = os.path.join(root, fn)
                 files.append(fp)
@@ -248,7 +275,11 @@ class FileOrganizer:
         if info.ai_subcategory:
             logger.info(f"{prefix}📂 Подкатегория: {info.ai_subcategory}")
         if info.ai_suggested_name:
-            logger.info(f"{prefix}✏️  Имя: {info.ai_suggested_name}.{info.extension}")
+            # Проверяем, есть ли уже расширение в имени
+            name_display = info.ai_suggested_name
+            if not name_display.lower().endswith(f".{info.extension.lower()}"):
+                name_display = f"{name_display}.{info.extension}"
+            logger.info(f"{prefix}✏️  Имя: {name_display}")
         if info.ai_description:
             logger.info(f"{prefix}💬 {info.ai_description}")
         if info.ai_reasoning:
@@ -386,6 +417,63 @@ class FileOrganizer:
 
         logger.info(f"Перемещено: {moved}, пропущено: {skipped}")
 
+    def _scan_existing_categories(self):
+        """Сканировать target-каталог и восстановить категории из существующих файлов.
+        
+        Если target внутри source — не сканируем, чтобы не перепутать
+        ещё необработанные файлы с уже организованными.
+        """
+        if not self.target.exists():
+            return
+        if self.target_inside_source:
+            logger.info("Target внутри source — пропускаю сканирование категорий")
+            return
+        for root, dirs, files in os.walk(self.target):
+            # Пропускаем служебные каталоги
+            rel = os.path.relpath(root, self.target)
+            if rel.startswith("_"):
+                dirs.clear()
+                continue
+            # Первый уровень — категория, второй — подкатегория
+            parts = Path(rel).parts
+            if len(parts) >= 1 and parts[0] and not parts[0].startswith("_"):
+                cat = parts[0]
+                self.existing_categories.add(cat)
+                if len(parts) >= 2 and parts[1]:
+                    self.existing_subcategories.setdefault(cat, set()).add(parts[1])
+            dirs[:] = [d for d in dirs if not d.startswith("_")]
+        if self.existing_categories:
+            logger.info(f"Найдено существующих категорий: {len(self.existing_categories)}")
+
+    def _move_single_file(self, info: FileInfo, dry_run: bool) -> bool:
+        """Переместить один файл сразу после анализа."""
+        target = self.determine_target_path(info)
+
+        if dry_run:
+            action = "🗑 УДАЛИТЬ" if info.should_delete else "📦 ПЕРЕМЕСТИТЬ"
+            logger.info(f"  │ [DRY] {action}: {target}")
+            return True
+
+        try:
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            shutil.move(info.original_path, target)
+
+            # Сохраняем в state
+            self.state.mark_processed(info)
+            self.state.moved_files[info.original_path] = target
+            if info.ai_category:
+                subs = self.state.categories.setdefault(info.ai_category, set())
+                if info.ai_subcategory:
+                    subs.add(info.ai_subcategory)
+            self.state.save()
+
+            logger.info(f"  │ ✅ -> {target}")
+            return True
+        except Exception as e:
+            logger.error(f"  │ ❌ Ошибка перемещения {info.filename}: {e}")
+            self.errors.append(str(e))
+            return False
+
     # ── Главный запуск ───────────────────────────
     def run(self, dry_run: bool = False, skip_diagnostics: bool = False, limit: int = 0):
         # ── Диагностика ──
@@ -401,6 +489,7 @@ class FileOrganizer:
         logger.info(f"Источник: {self.source}")
         logger.info(f"Цель:     {self.target}")
         logger.info(f"Последний запуск: {self.state.last_run or 'никогда'}")
+        logger.info(f"В state обработано: {self.state.total_processed}")
         logger.info("=" * 60)
 
         if not dry_run:
@@ -408,65 +497,67 @@ class FileOrganizer:
                       BUILD_ARTIFACTS_DIR, STATE_DIR):
                 os.makedirs(d, exist_ok=True)
 
-        # 1. Сбор
+        # 1. Сбор файлов
         if not self.all_files:
             self.collect_files()
 
-        # Ограничение
-        if limit > 0:
-            self.all_files = self.all_files[:limit]
-            logger.info(f"Ограничение: обрабатываю {limit} файлов из {len(self.all_files)}")
-
-        # Загрузить существующие категории из state и отчёта
-        self._load_existing_categories()
-
-        # 2. Анализ
-        logger.info("Анализ файлов...")
+        # Фильтрация уже обработанных (по хешу)
+        pending = []
+        skipped_count = 0
         for fp in self.all_files:
-            # Пропускаем уже обработанные
             fh = compute_file_hash(fp)
             if self.state.is_already_processed(fh) and not dry_run:
-                logger.info(f"  ⏭ Пропуск (уже обработан): {Path(fp).name}")
+                skipped_count += 1
                 continue
+            pending.append(fp)
+
+        if limit > 0:
+            pending = pending[:limit]
+
+        logger.info(f"Всего файлов: {len(self.all_files)}, уже обработано: {skipped_count}, "
+                     f"к обработке: {len(pending)}")
+
+        # 2. Загрузка категорий из state + сканирование target
+        self._load_existing_categories()
+        self._scan_existing_categories()
+
+        # 3. Обработка каждого файла (анализ → перемещение сразу)
+        logger.info("Начинаю обработку...")
+        processed_count = 0
+        for i, fp in enumerate(pending):
+            if self._stop_requested:
+                logger.info(f"⏹ Остановка по запросу. Обработано {processed_count} файлов.")
+                break
+
+            logger.info(f"[{i+1}/{len(pending)}] {Path(fp).name}")
             try:
-                logger.info(f"  ┌─ {Path(fp).name}")
                 info = self.analyze_file(fp)
                 self.file_infos.append(info)
-                # Сразу показываем решение
                 self._print_decision(info, dry_run=dry_run)
+
+                # Перемещаем сразу после анализа
+                self._move_single_file(info, dry_run=dry_run)
+                processed_count += 1
+
             except Exception as e:
-                logger.error(f"  ✗ Ошибка анализа {fp}: {e}")
+                logger.error(f"  ✗ Ошибка: {e}")
                 self.errors.append(str(e))
 
-        # 3. Дубликаты
-        logger.info("Поиск дубликатов...")
-        self.handle_duplicates()
-
-        # 4. Связи
-        logger.info("Определение связей...")
-        self.find_relationships()
-
-        # 5. Архивы
-        archives = [fi for fi in self.file_infos if fi.is_archive]
-        if archives:
-            logger.info(f"Распаковка {len(archives)} архивов...")
-            self.process_archives(dry_run=dry_run)
-
-        # 6. Статистика
+        # 4. Итоговая статистика
         cats = {}
         for fi in self.file_infos:
             cat = fi.ai_category or "?"
             cats[cat] = cats.get(cat, 0) + 1
+        logger.info("")
         logger.info("Категории:")
         for cat, n in sorted(cats.items(), key=lambda x: -x[1]):
             logger.info(f"  {cat}: {n}")
 
-        # 8. Сохранение state
         self.state.save()
-
-        # 7. Перемещение
-        logger.info("Перемещение...")
-        self.move_files(dry_run=dry_run)
+        logger.info(f"Ошибок: {len(self.errors)}")
+        if self._stop_requested:
+            logger.info("⏹ Остановлено пользователем/state сохранён")
+        logger.info("Готово.")
 
         # 8. Сохранение state
         if not dry_run:

@@ -6,7 +6,7 @@ LOCALAI_URL = os.getenv("LOCALAI_URL", "http://localhost:11434/v1")
 LOCALAI_MODEL = os.getenv("LOCALAI_MODEL", "qwen3.5-35b-a3b-apex")
 SEARXNG_URL = os.getenv("SEARXNG_URL", "http://localhost:8080")
 SOURCE_DIR = os.path.expanduser("~/nextcloud/files")
-TARGET_DIR = os.path.expanduser("~/nextcloud/organized")
+TARGET_DIR = os.path.join(SOURCE_DIR, "organized")
 STATE_DIR = os.path.expanduser("~/.local/state/file-organizer")
 
 # Служебные каталоги

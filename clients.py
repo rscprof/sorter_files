@@ -60,9 +60,9 @@ class LocalAIClient:
             user_content = self._build_multimodal_prompt(text_content, image_path, file_context, existing_categories)
         elif image_path:
             if is_pdf_scan:
-                user_content = self._build_pdf_scan_prompt(file_context, existing_categories)
+                user_content = self._build_pdf_scan_prompt(file_context, existing_categories, image_path)
             else:
-                user_content = self._build_image_prompt(file_context, existing_categories)
+                user_content = self._build_image_prompt(file_context, existing_categories, image_path)
         elif text_content:
             user_content = self._build_text_prompt(text_content, file_context, existing_categories)
         else:
@@ -156,24 +156,32 @@ class LocalAIClient:
 Ответь ТОЛЬКО валидным JSON без markdown-оформления, без ```json, без текста — просто чистый JSON:
 {{"category": "...", "subcategory": "...", "suggested_name": "...", "description": "...", "is_distributable": false, "related_keywords": ["..."], "reasoning": "..."}}"""
 
-    def _build_image_prompt(self, context: str, existing_categories: str = "") -> list:
+    def _build_image_prompt(self, context: str, existing_categories: str = "", image_path: str = "") -> list:
         cats = existing_categories + "\n" if existing_categories else ""
+        img_b64 = ""
+        if image_path:
+            with open(image_path, "rb") as f:
+                img_b64 = base64.b64encode(f.read()).decode()
         return [
             {"type": "text", "text": f"Опиши это изображение и классифицируй его.{f' Контекст: {context}' if context else ''}\n{cats}"},
-            {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,{{B64}}"}},
+            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}", "detail": "low"}},
             {"type": "text", "text": 'Ответь ТОЛЬКО валидным JSON без markdown-оформления, без ```json: {"category": "...", "subcategory": "...", "suggested_name": "...", "description": "...", "is_distributable": false, "related_keywords": ["..."], "reasoning": "..."}'},
         ]
 
-    def _build_pdf_scan_prompt(self, context: str, existing_categories: str = "") -> list:
+    def _build_pdf_scan_prompt(self, context: str, existing_categories: str = "", image_path: str = "") -> list:
         """Промпт для PDF-скана: нужно распознать текст (OCR) и классифицировать."""
         cats = existing_categories + "\n" if existing_categories else ""
+        img_b64 = ""
+        if image_path:
+            with open(image_path, "rb") as f:
+                img_b64 = base64.b64encode(f.read()).decode()
         return [
             {"type": "text", "text": (
                 f"Это скан документа (PDF→изображение). "
                 f"Распознай весь видимый текст (OCR), определи тематику и классифицируй документ. "
                 f"{f'Контекст: {context}' if context else ''}\n{cats}"
             )},
-            {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,{{B64}}"}},
+            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}", "detail": "low"}},
             {"type": "text", "text": (
                 'Ответь ТОЛЬКО валидным JSON без markdown-оформления, без ```json: '
                 '{"category": "...", "subcategory": "...", "suggested_name": "...", '
@@ -188,7 +196,7 @@ class LocalAIClient:
         cats = existing_categories + "\n" if existing_categories else ""
         return [
             {"type": "text", "text": f"Проанализируй файл. Извлечённый текст: {text[:3000]}{f' Контекст: {context}' if context else ''}\n{cats}"},
-            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}},
+            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}", "detail": "low"}},
             {"type": "text", "text": 'Ответь ТОЛЬКО валидным JSON без markdown-оформления, без ```json: {"category": "...", "subcategory": "...", "suggested_name": "...", "description": "...", "is_distributable": false, "related_keywords": ["..."], "reasoning": "..."}'},
         ]
 
