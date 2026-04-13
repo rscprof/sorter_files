@@ -8,13 +8,24 @@ import os
 import subprocess
 from pathlib import Path
 
-from config import ARCHIVE_EXTS, EXECUTABLE_EXTS, IMAGE_EXTS
+from config import ARCHIVE_EXTS, EXECUTABLE_EXTS, IMAGE_EXTS, TEMP_FILE_PATTERNS
 
 
 AUDIO_EXTS = {"ogg", "mp3", "wav", "flac", "aac", "wma", "m4a", "opus", "aiff"}
 
 # Форматы, которые модель НЕ принимает — надо конвертировать в JPEG
 NON_NATIVE_IMAGE_EXTS = {"webp", "bmp", "tiff", "tif", "heic", "heif", "raw", "cr2", "nef", "arw", "svg"}
+
+
+def is_temp_file(filepath: str) -> bool:
+    """Проверить, является ли файл временным/мусорным."""
+    import fnmatch
+    from pathlib import Path
+    name = Path(filepath).name
+    for pattern in TEMP_FILE_PATTERNS:
+        if fnmatch.fnmatch(name, pattern):
+            return True
+    return False
 
 
 def compute_file_hash(filepath: str, max_size: int = 100 * 1024 * 1024) -> str:
@@ -64,6 +75,12 @@ def extract_text(filepath: str) -> str:
 
         if ext == "pdf":
             return _extract_pdf(filepath)
+
+        if ext == "djvu":
+            return _extract_djvu(filepath)
+
+        if ext == "doc":
+            return _extract_doc(filepath)
 
         return _quick_signature(filepath, ext)
     except Exception:
@@ -186,6 +203,57 @@ def _extract_pdf(filepath: str) -> str:
         pass
 
     return ""
+
+
+def _extract_djvu(filepath: str) -> str:
+    """Извлечь текст из DJVU через djvutxt или ddjvu."""
+    try:
+        result = subprocess.run(
+            ["djvutxt", filepath],
+            capture_output=True, text=True, timeout=60,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout[:5000]
+    except (FileNotFoundError, Exception):
+        pass
+    try:
+        import tempfile
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+            tmp_pdf = tmp.name
+        subprocess.run(
+            ["ddjvu", "-format=pdf", filepath, tmp_pdf],
+            capture_output=True, timeout=120,
+        )
+        if os.path.exists(tmp_pdf):
+            text = _extract_pdf(tmp_pdf)
+            os.unlink(tmp_pdf)
+            return text
+    except Exception:
+        pass
+    return ""
+
+
+def _extract_doc(filepath: str) -> str:
+    """Извлечь текст из .doc (старый формат)."""
+    try:
+        result = subprocess.run(
+            ["antiword", "-m", "UTF-8", filepath],
+            capture_output=True, text=True, timeout=30,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout[:5000]
+    except (FileNotFoundError, Exception):
+        pass
+    try:
+        result = subprocess.run(
+            ["catdoc", filepath],
+            capture_output=True, text=True, timeout=30,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout[:5000]
+    except (FileNotFoundError, Exception):
+        pass
+    return f"[DOC файл, размер: {os.path.getsize(filepath)} байт]"
 
 
 def pdf_to_images(filepath: str, max_pages: int = 5) -> list[str]:

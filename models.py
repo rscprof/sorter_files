@@ -122,6 +122,7 @@ class ProcessingState:
     categories: dict[str, set] = field(default_factory=dict)        # category -> {subcategories}
     moved_files: dict[str, str] = field(default_factory=dict)       # original_path -> target_path
     pending_deletes: list[str] = field(default_factory=list)        # файлы, готовые к удалению
+    restore_map: dict[str, dict] = field(default_factory=dict)      # target_path -> {original_path, category, ...}
     last_run: str = ""
     total_processed: int = 0
     total_duplicates_found: int = 0
@@ -146,6 +147,7 @@ class ProcessingState:
             "categories": {k: list(v) for k, v in self.categories.items()},
             "moved_files": self.moved_files,
             "pending_deletes": self.pending_deletes,
+            "restore_map": self.restore_map,
         }
         with open(self.state_path, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
@@ -173,6 +175,7 @@ class ProcessingState:
                 state.categories[cat] = set(subs) if isinstance(subs, list) else set()
             state.moved_files = data.get("moved_files", {})
             state.pending_deletes = data.get("pending_deletes", [])
+            state.restore_map = data.get("restore_map", {})
         except Exception as e:
             print(f"Warning: could not load state: {e}")
         return state
@@ -187,6 +190,16 @@ class ProcessingState:
         if info.file_hash:
             self.processed_files[info.file_hash] = info.to_dict()
             self.total_processed += 1
+        # Карта восстановления
+        if info.original_path and info.target_path:
+            self.restore_map[info.target_path] = {
+                "original_path": info.original_path,
+                "category": info.ai_category,
+                "subcategory": info.ai_subcategory,
+                "description": info.ai_description,
+                "size": info.size,
+                "timestamp": datetime.now().isoformat(),
+            }
 
     def register_duplicate(self, file_hash: str, path: str):
         if file_hash not in self.duplicates:

@@ -47,3 +47,25 @@ PROJECT_EXCLUDE_DIRS = [
     "html", "www", "var", "etc", "usr", "lib", "node_modules",
     "vendor", "htdocs", "public_html",
 ]
+
+# Шаблоны временных/мусорных файлов — пропускать без обработки
+TEMP_FILE_PATTERNS = [
+    "~$*",           # Office temp files (~$document.docx)
+    "~*",            # Generic temp files (~WRL0003.tmp)
+    "*.tmp",         # Temp files
+    "*.temp",
+    "*.bak",
+    "*.backup",
+    "*.swp",         # Vim swap
+    "*.swo",
+    "*~",            # Emacs/backup
+    ".DS_Store",
+    "Thumbs.db",
+    "desktop.ini",
+    ".localized",
+    "._*",           # macOS resource forks
+    ".AppleDouble",
+    ".Spotlight-V100",
+    ".Trash*",
+    ".cache",
+]
