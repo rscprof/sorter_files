@@ -27,9 +27,11 @@ class LocalAIClient:
         self.session.timeout = 180
 
     def analyze_content(self, text_content: str = "", image_path: str = "",
-                        file_context: str = "", existing_categories: str = "") -> dict:
+                        file_context: str = "", existing_categories: str = "",
+                        is_pdf_scan: bool = False) -> dict:
         """
         Универсальный анализ: текст, изображение или оба.
+        is_pdf_scan=True — PDF-скан: нужно распознать текст (OCR) и классифицировать.
         """
         messages = []
 
@@ -57,7 +59,10 @@ class LocalAIClient:
         if image_path and text_content:
             user_content = self._build_multimodal_prompt(text_content, image_path, file_context, existing_categories)
         elif image_path:
-            user_content = self._build_image_prompt(file_context, existing_categories)
+            if is_pdf_scan:
+                user_content = self._build_pdf_scan_prompt(file_context, existing_categories)
+            else:
+                user_content = self._build_image_prompt(file_context, existing_categories)
         elif text_content:
             user_content = self._build_text_prompt(text_content, file_context, existing_categories)
         else:
@@ -157,6 +162,23 @@ class LocalAIClient:
             {"type": "text", "text": f"Опиши это изображение и классифицируй его.{f' Контекст: {context}' if context else ''}\n{cats}"},
             {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,{{B64}}"}},
             {"type": "text", "text": 'Ответь ТОЛЬКО валидным JSON без markdown-оформления, без ```json: {"category": "...", "subcategory": "...", "suggested_name": "...", "description": "...", "is_distributable": false, "related_keywords": ["..."], "reasoning": "..."}'},
+        ]
+
+    def _build_pdf_scan_prompt(self, context: str, existing_categories: str = "") -> list:
+        """Промпт для PDF-скана: нужно распознать текст (OCR) и классифицировать."""
+        cats = existing_categories + "\n" if existing_categories else ""
+        return [
+            {"type": "text", "text": (
+                f"Это скан документа (PDF→изображение). "
+                f"Распознай весь видимый текст (OCR), определи тематику и классифицируй документ. "
+                f"{f'Контекст: {context}' if context else ''}\n{cats}"
+            )},
+            {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,{{B64}}"}},
+            {"type": "text", "text": (
+                'Ответь ТОЛЬКО валидным JSON без markdown-оформления, без ```json: '
+                '{"category": "...", "subcategory": "...", "suggested_name": "...", '
+                '"description": "...", "is_distributable": false, "related_keywords": ["..."], "reasoning": "..."}'
+            )},
         ]
 
     def _build_multimodal_prompt(self, text: str, image_path: str, context: str, existing_categories: str = "") -> list:

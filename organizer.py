@@ -17,7 +17,7 @@ from config import (
 )
 from models import FileInfo, ImageMetadata, ProcessingState
 from clients import LocalAIClient, SearXNGClient
-from analyzer import compute_file_hash, extract_text, is_archive, is_executable, is_image, AUDIO_EXTS, pdf_to_images
+from analyzer import compute_file_hash, extract_text, is_archive, is_executable, is_image, AUDIO_EXTS, pdf_to_images, image_to_jpeg
 from metadata import read_image_metadata, read_audio_metadata
 from projects import find_project_root, is_build_artifact
 from archives import extract_archive
@@ -137,27 +137,46 @@ class FileOrganizer:
         pdf_images = []
         use_pdf_images = False
         if ext == "pdf" and (not ai_text or len(ai_text) < 50):
-            logger.info(f"  → PDF без текста, конвертирую в изображения...")
+            logger.info(f"  → PDF без текста, конвертирую в JPEG...")
             pdf_images = pdf_to_images(filepath, max_pages=3)
             if pdf_images:
-                logger.info(f"  ← Создано {len(pdf_images)} изображений, отправляю мультимодально")
+                logger.info(f"  ← Создано {len(pdf_images)} JPEG, отправляю мультимодально (OCR)")
                 use_pdf_images = True
-                # Текст может быть пуст, но изображения дадут описание
-                ai_text = ""  # Пусть AI смотрит только на картинки
+                ai_text = ""  # Пусть AI смотрит только на картинки и распознаёт текст
+
+        # Изображения не-JPEG — конвертируем в JPEG для модели
+        temp_jpeg_path = ""
+        image_for_ai = ""
+        if is_image(filepath):
+            ext_lower = ext.lower()
+            if ext_lower in ("jpg", "jpeg"):
+                image_for_ai = filepath
+            else:
+                logger.info(f"  → Конвертация {ext.upper()} → JPEG...")
+                temp_jpeg_path = image_to_jpeg(filepath)
+                image_for_ai = temp_jpeg_path
+                if temp_jpeg_path != filepath:
+                    logger.info(f"  ← Готово: {Path(temp_jpeg_path).name}")
 
         cat_context = self._get_categories_context()
         ai_result = self.localai.analyze_content(
             text_content=ai_text,
-            image_path=pdf_images[0] if use_pdf_images else (filepath if is_image(filepath) else ""),
+            image_path=image_for_ai if is_image(filepath) else (pdf_images[0] if use_pdf_images else ""),
             file_context=f"Имя: {p.name}, Каталог: {p.parent.name}",
             existing_categories=cat_context,
+            is_pdf_scan=use_pdf_images,
         )
 
-        # Очищаем временные изображения
+        # Очищаем временные файлы
         import os as _os
         for img in pdf_images:
             try:
                 _os.remove(img)
+            except Exception:
+                pass
+        if temp_jpeg_path and temp_jpeg_path != filepath:
+            try:
+                _os.remove(temp_jpeg_path)
             except Exception:
                 pass
 

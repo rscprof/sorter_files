@@ -13,6 +13,9 @@ from config import ARCHIVE_EXTS, EXECUTABLE_EXTS, IMAGE_EXTS
 
 AUDIO_EXTS = {"ogg", "mp3", "wav", "flac", "aac", "wma", "m4a", "opus", "aiff"}
 
+# Форматы, которые модель НЕ принимает — надо конвертировать в JPEG
+NON_NATIVE_IMAGE_EXTS = {"webp", "bmp", "tiff", "tif", "heic", "heif", "raw", "cr2", "nef", "arw", "svg"}
+
 
 def compute_file_hash(filepath: str, max_size: int = 100 * 1024 * 1024) -> str:
     """SHA-256 хеш. Для больших файлов — partial hash."""
@@ -187,37 +190,39 @@ def _extract_pdf(filepath: str) -> str:
 
 def pdf_to_images(filepath: str, max_pages: int = 5) -> list[str]:
     """
-    Конвертировать PDF-страницы в PNG-изображения.
+    Конвертировать PDF-страницы в JPEG-изображения.
     Возвращает список путей к временным файлам.
     Вызывающий обязан удалить их после использования.
+
+    Qwen3.5 мультимодальная модель принимает JPEG/PNG.
+    JPEG предпочтительнее — меньше размер при кодировании в base64.
     """
     import tempfile
     images = []
     try:
-        # pdftocairo из poppler-utils — лучше качество чем pdftoppm
+        # pdftocairo → JPEG (меньше размер, модель принимает)
         with tempfile.TemporaryDirectory(prefix="pdf_") as tmpdir:
             prefix = os.path.join(tmpdir, "page")
             result = subprocess.run(
                 [
-                    "pdftocairo", "-png", "-r", "150",
+                    "pdftocairo", "-jpeg", "-r", "150",
                     "-f", "1", "-l", str(max_pages),
                     filepath, prefix
                 ],
                 capture_output=True, text=True, timeout=120,
             )
             if result.returncode == 0:
-                # pdftocairo создаёт page-1.png, page-2.png, ...
                 for fn in sorted(os.listdir(tmpdir)):
-                    if fn.endswith(".png"):
+                    if fn.endswith(".jpg"):
                         images.append(os.path.join(tmpdir, fn))
-    except (FileNotFoundError, subprocess.TimeoutExpired, Exception) as e:
+    except (FileNotFoundError, subprocess.TimeoutExpired, Exception):
         # Fallback: pdftoppm
         try:
             with tempfile.TemporaryDirectory(prefix="pdf_") as tmpdir:
                 prefix = os.path.join(tmpdir, "page")
                 result = subprocess.run(
                     [
-                        "pdftoppm", "-png", "-r", "150",
+                        "pdftoppm", "-jpeg", "-r", "150",
                         "-f", "1", "-l", str(max_pages),
                         filepath, prefix
                     ],
@@ -225,12 +230,49 @@ def pdf_to_images(filepath: str, max_pages: int = 5) -> list[str]:
                 )
                 if result.returncode == 0:
                     for fn in sorted(os.listdir(tmpdir)):
-                        if fn.endswith(".png"):
+                        if fn.endswith(".jpg"):
                             images.append(os.path.join(tmpdir, fn))
         except Exception:
             pass
 
     return images
+
+
+def image_to_jpeg(filepath: str, quality: int = 85) -> str:
+    """
+    Конвертировать изображение в JPEG для совместимости с Qwen3.5.
+    Возвращает путь к временному файлу (вызывающий должен удалить).
+    Если файл уже JPEG — возвращает исходный путь.
+    """
+    ext = Path(filepath).suffix.lower().lstrip(".")
+    if ext in ("jpg", "jpeg"):
+        return filepath  # Уже JPEG
+
+    try:
+        from PIL import Image
+        tmp_path = filepath + ".converted.jpg"
+        img = Image.open(filepath)
+        # HEIC/HEIF могут быть в режиме CMYK — конвертируем
+        if img.mode in ("RGBA", "P", "LA"):
+            img = img.convert("RGB")
+        img.save(tmp_path, "JPEG", quality=quality)
+        return tmp_path
+    except ImportError:
+        # Fallback: ffmpeg через ffprobe+swscale
+        try:
+            tmp_path = filepath + ".converted.jpg"
+            result = subprocess.run(
+                ["ffmpeg", "-y", "-i", filepath, "-q:v", "2", tmp_path],
+                capture_output=True, text=True, timeout=30,
+            )
+            if result.returncode == 0 and os.path.exists(tmp_path):
+                return tmp_path
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+    return filepath  # Вернём как есть, если конвертация не удалась
 
 
 def _quick_signature(filepath: str, ext: str) -> str:
