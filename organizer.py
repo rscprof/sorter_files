@@ -27,6 +27,7 @@ from relationships import group_related_files
 from diagnostics import run_diagnostics
 from modules import get_analyzers
 from projects import find_project_root, is_build_artifact, is_project_directory, get_directory_listing
+from provenance import ProvenanceStore
 
 logging.basicConfig(
     level=logging.INFO,
@@ -44,6 +45,7 @@ class FileOrganizer:
         self.source = Path(source)
         self.target = Path(target)
         self.state = ProcessingState.load()
+        self.provenance = ProvenanceStore(str(self.target))
         self.localai = LocalAIClient()
         self.searxng = SearXNGClient()
         self.all_files: list[str] = []
@@ -249,7 +251,9 @@ class FileOrganizer:
                 if ei.is_archive:
                     self._process_archive_contents(ei, dry_run=dry_run, depth=depth + 1)
                 else:
-                    self._move_single_file(ei, dry_run=dry_run)
+                    self._move_single_file(ei, dry_run=dry_run,
+                                           archive_source=archive_info.original_path,
+                                           archive_extract_dir=extract_dir)
             except Exception as e:
                 logger.error(f"{indent}  ✗ Ошибка обработки {fp}: {e}")
                 self.errors.append(str(e))
@@ -632,7 +636,8 @@ class FileOrganizer:
         self.state.save()
         return results
 
-    def _move_single_file(self, info: FileInfo, dry_run: bool) -> bool:
+    def _move_single_file(self, info: FileInfo, dry_run: bool,
+                           archive_source: str = "", archive_extract_dir: str = "") -> bool:
         """Переместить один файл сразу после анализа."""
         target = self.determine_target_path(info)
 
@@ -652,7 +657,23 @@ class FileOrganizer:
                 subs = self.state.categories.setdefault(info.ai_category, set())
                 if info.ai_subcategory:
                     subs.add(info.ai_subcategory)
+
+            # Provenance card
+            self.provenance.upsert(
+                file_hash=info.file_hash or compute_file_hash(target),
+                filename=info.filename,
+                original_path=info.original_path,
+                current_path=target,
+                category=info.ai_category,
+                subcategory=info.ai_subcategory,
+                description=info.ai_description,
+                archive_source=archive_source,
+                archive_extract_dir=archive_extract_dir,
+                reason="reprocess" if self.state.is_already_processed(info.file_hash) else "initial",
+            )
+
             self.state.save()
+            self.provenance.save()
 
             # Обновляем индекс дубликатов
             if info.file_hash:
@@ -908,6 +929,9 @@ def main():
     parser.add_argument("--debug", action="store_true", help="DEBUG: логировать промпты и ответы AI")
     parser.add_argument("--cleanup", action="store_true", help="Удалить исходные файлы после перемещения")
     parser.add_argument("--reprocess", action="store_true", help="Повторно обработать уже перемещённые файлы")
+    parser.add_argument("--restore-dir", type=str, default="", help="Восстановить все файлы из указанного исходного каталога")
+    parser.add_argument("--find-file", type=str, default="", help="Найти где находится файл по его оригинальному пути")
+    parser.add_argument("--provenance-stats", action="store_true", help="Показать статистику provenance")
     parser.add_argument("--restore", type=str, default="", help="Восстановить файлы из organized в исходное место (путь или 'all')")
     args = parser.parse_args()
 
@@ -921,6 +945,72 @@ def main():
     import clients
     if args.debug:
         clients.DEBUG = True
+
+    # Проведение provenance-операций
+    if args.provenance_stats:
+        prov = ProvenanceStore(args.target)
+        stats = prov.get_stats()
+        print(f"\n📊 Provenance Statistics")
+        print(f"  Карточек: {stats['total_cards']}")
+        print(f"  Из архивов: {stats['with_archive_source']}")
+        print(f"  С историей: {stats['with_move_history']}")
+        print(f"  Категории:")
+        for cat, n in sorted(stats['categories'].items(), key=lambda x: -x[1]):
+            print(f"    {cat}: {n}")
+        return
+
+    if args.find_file:
+        prov = ProvenanceStore(args.target)
+        filepath = os.path.abspath(os.path.expanduser(args.find_file))
+        # Ищем по хешу, original_path, или first_seen_path
+        found = []
+        for card in prov.cards.values():
+            if (filepath in card.first_seen_path or
+                filepath in card.current_path or
+                any(filepath in m.get("from", "") for m in card.move_history)):
+                found.append(card)
+        if found:
+            print(f"\n🔍 Найдено {len(found)} записей для '{args.find_file}':")
+            for card in found:
+                print(f"  📄 {card.filename}")
+                print(f"     Первое место: {card.first_seen_path}")
+                print(f"     Сейчас:       {card.current_path}")
+                print(f"     Категория:    {card.category}")
+                if card.archive_source:
+                    print(f"     Из архива:    {card.archive_source}")
+                if card.move_history:
+                    print(f"     Перемещений:  {len(card.move_history)}")
+        else:
+            print(f"Не найдено записей для '{args.find_file}'")
+        return
+
+    if args.restore_dir:
+        prov = ProvenanceStore(args.target)
+        orig_dir = os.path.abspath(os.path.expanduser(args.restore_dir))
+        cards = prov.find_by_first_seen(orig_dir)
+        if not cards:
+            # Попробуем по пути в move_history
+            cards = prov.find_by_original(orig_dir)
+        if not cards:
+            print(f"Нет файлов из '{orig_dir}'")
+            return
+        print(f"\n♻️  Восстановление {len(cards)} файлов из '{orig_dir}':")
+        import shutil as sh
+        for card in cards:
+            if os.path.exists(card.current_path):
+                # Создаём директорию по original_path (first_seen_path)
+                dest = card.first_seen_path
+                os.makedirs(os.path.dirname(dest), exist_ok=True)
+                try:
+                    sh.move(card.current_path, dest)
+                    print(f"  ✅ {Path(card.current_path).name} -> {dest}")
+                    del prov.cards[card.file_hash]
+                except Exception as e:
+                    print(f"  ❌ {Path(card.current_path).name}: {e}")
+            else:
+                print(f"  ⚠️  {card.filename} не найден в {card.current_path}")
+        prov.save()
+        return
 
     if args.restore:
         state = ProcessingState.load()
