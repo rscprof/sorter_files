@@ -17,7 +17,7 @@ from config import (
 )
 from models import FileInfo, ImageMetadata, ProcessingState
 from clients import LocalAIClient, SearXNGClient
-from analyzer import compute_file_hash, extract_text, is_archive, is_executable, is_image, AUDIO_EXTS
+from analyzer import compute_file_hash, extract_text, is_archive, is_executable, is_image, AUDIO_EXTS, pdf_to_images
 from metadata import read_image_metadata, read_audio_metadata
 from projects import find_project_root, is_build_artifact
 from archives import extract_archive
@@ -126,18 +126,41 @@ class FileOrganizer:
 
         # AI-анализ (текст и/или изображение)
         text = extract_text(filepath)
+
         # Для аудио используем транскрипт вместо «[OGG файл, ...]»
+        is_audio = ext in AUDIO_EXTS
         ai_text = text if (text and not text.startswith("[")) else ""
         if is_audio and info.audio_transcript:
             ai_text = info.audio_transcript
 
+        # PDF без текста — конвертируем в изображения и разбираем мультимодально
+        pdf_images = []
+        use_pdf_images = False
+        if ext == "pdf" and (not ai_text or len(ai_text) < 50):
+            logger.info(f"  → PDF без текста, конвертирую в изображения...")
+            pdf_images = pdf_to_images(filepath, max_pages=3)
+            if pdf_images:
+                logger.info(f"  ← Создано {len(pdf_images)} изображений, отправляю мультимодально")
+                use_pdf_images = True
+                # Текст может быть пуст, но изображения дадут описание
+                ai_text = ""  # Пусть AI смотрит только на картинки
+
         cat_context = self._get_categories_context()
         ai_result = self.localai.analyze_content(
             text_content=ai_text,
-            image_path=filepath if is_image(filepath) else "",
+            image_path=pdf_images[0] if use_pdf_images else (filepath if is_image(filepath) else ""),
             file_context=f"Имя: {p.name}, Каталог: {p.parent.name}",
             existing_categories=cat_context,
         )
+
+        # Очищаем временные изображения
+        import os as _os
+        for img in pdf_images:
+            try:
+                _os.remove(img)
+            except Exception:
+                pass
+
         if ai_result:
             info.ai_category = ai_result.get("category", "неразобранное")
             info.ai_subcategory = ai_result.get("subcategory", "")
@@ -153,6 +176,9 @@ class FileOrganizer:
                     info.ai_description = info.audio_metadata.summary()
                 else:
                     info.ai_description = f"Аудио {ext.upper()}"
+            elif ext == "pdf":
+                info.ai_category = "PDF (скан)"
+                info.ai_description = "PDF без текста и без ответа AI"
             else:
                 info.ai_category = "Неразобранное"
                 info.ai_description = f"AI не ответил ({ext})"

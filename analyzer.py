@@ -178,11 +178,59 @@ def _extract_pdf(filepath: str) -> str:
                 t = page.extract_text()
                 if t:
                     text += t + "\n"
-            return text[:5000]
+            return text[:5000] if text.strip() else ""
     except (ImportError, Exception):
         pass
 
-    return _quick_signature(filepath, "pdf")
+    return ""
+
+
+def pdf_to_images(filepath: str, max_pages: int = 5) -> list[str]:
+    """
+    Конвертировать PDF-страницы в PNG-изображения.
+    Возвращает список путей к временным файлам.
+    Вызывающий обязан удалить их после использования.
+    """
+    import tempfile
+    images = []
+    try:
+        # pdftocairo из poppler-utils — лучше качество чем pdftoppm
+        with tempfile.TemporaryDirectory(prefix="pdf_") as tmpdir:
+            prefix = os.path.join(tmpdir, "page")
+            result = subprocess.run(
+                [
+                    "pdftocairo", "-png", "-r", "150",
+                    "-f", "1", "-l", str(max_pages),
+                    filepath, prefix
+                ],
+                capture_output=True, text=True, timeout=120,
+            )
+            if result.returncode == 0:
+                # pdftocairo создаёт page-1.png, page-2.png, ...
+                for fn in sorted(os.listdir(tmpdir)):
+                    if fn.endswith(".png"):
+                        images.append(os.path.join(tmpdir, fn))
+    except (FileNotFoundError, subprocess.TimeoutExpired, Exception) as e:
+        # Fallback: pdftoppm
+        try:
+            with tempfile.TemporaryDirectory(prefix="pdf_") as tmpdir:
+                prefix = os.path.join(tmpdir, "page")
+                result = subprocess.run(
+                    [
+                        "pdftoppm", "-png", "-r", "150",
+                        "-f", "1", "-l", str(max_pages),
+                        filepath, prefix
+                    ],
+                    capture_output=True, text=True, timeout=120,
+                )
+                if result.returncode == 0:
+                    for fn in sorted(os.listdir(tmpdir)):
+                        if fn.endswith(".png"):
+                            images.append(os.path.join(tmpdir, fn))
+        except Exception:
+            pass
+
+    return images
 
 
 def _quick_signature(filepath: str, ext: str) -> str:
