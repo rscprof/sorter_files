@@ -54,17 +54,11 @@ class PdfScansAnalyzer(BaseAnalyzer):
             info.ai_description = "Не удалось конвертировать PDF в изображения"
             return info
 
-        logger.info(f"  ← Создано {len(pdf_images)} JPEG, отправляю мультимодально (OCR)")
+        logger.info(f"  ← Создано {len(pdf_images)} JPEG, VL-модель описывает...")
 
-        # AI-анализ изображения
+        # Этап 1: VL-модель описывает первый кадр
         context = f"Имя: {p.name}, Каталог: {p.parent.name}"
-        ai_result = localai.analyze_content(
-            text_content="",
-            image_path=pdf_images[0],
-            file_context=context,
-            existing_categories=existing_categories,
-            is_pdf_scan=True,
-        )
+        description = localai.describe_image(pdf_images[0], context=context)
 
         # Очистка временных файлов
         for img in pdf_images:
@@ -73,15 +67,29 @@ class PdfScansAnalyzer(BaseAnalyzer):
             except Exception:
                 pass
 
+        if not description:
+            info.ai_category = "PDF (скан)"
+            info.ai_description = "VL-модель не смогла описать PDF-скан"
+            return info
+
+        logger.info(f"  ← Описание: {description[:200]}...")
+
+        # Этап 2: Mini-модель классифицирует по описанию
+        ai_result = localai.analyze_content(
+            text_content=description,
+            file_context=context,
+            existing_categories=existing_categories,
+        )
+
         if ai_result:
             info.ai_category = ai_result.get("category", "Документы")
             info.ai_subcategory = ai_result.get("subcategory", "")
             info.ai_suggested_name = ai_result.get("suggested_name", "")
-            info.ai_description = ai_result.get("description", "")
+            info.ai_description = ai_result.get("description", description[:150])
             info.ai_reasoning = ai_result.get("reasoning", "")
             info.is_distributable = ai_result.get("is_distributable", False)
         else:
             info.ai_category = "PDF (скан)"
-            info.ai_description = "PDF-скан без ответа AI"
+            info.ai_description = description[:150]
 
         return info

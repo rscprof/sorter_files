@@ -11,7 +11,7 @@ from typing import Optional
 
 import requests
 
-from config import LOCALAI_URL, LOCALAI_MODEL, LOCALAI_TEXT_MODEL, SEARXNG_URL
+from config import LOCALAI_URL, LOCALAI_MODEL, LOCALAI_TEXT_MODEL, LOCALAI_VL_MODEL, SEARXNG_URL
 
 logger = logging.getLogger(__name__)
 DEBUG = os.getenv("DEBUG", "").lower() in ("1", "true", "yes")
@@ -22,12 +22,64 @@ class LocalAIClient:
 
     def __init__(self, base_url: str = LOCALAI_URL,
                  model: str = LOCALAI_MODEL,
-                 text_model: str = LOCALAI_TEXT_MODEL):
+                 text_model: str = LOCALAI_TEXT_MODEL,
+                 vl_model: str = LOCALAI_VL_MODEL):
         self.base_url = base_url.rstrip("/")
         self.model = model  # мультимодальная (изображения)
         self.text_model = text_model  # только текст (быстрее)
+        self.vl_model = vl_model  # vision-language (описание изображений)
         self.session = requests.Session()
         self.session.timeout = 180
+
+    def describe_image(self, image_path: str, context: str = "") -> str:
+        """Описать изображение через VL-модель. Возвращает текст описания."""
+        try:
+            with open(image_path, "rb") as f:
+                img_b64 = base64.b64encode(f.read()).decode()
+
+            messages = [
+                {
+                    "role": "system",
+                    "content": "Опиши подробно что видно на изображении. Пиши на русском языке. Включай текст если он есть на картинке, людей, объекты, сцену."
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": f"Опиши это изображение.{f' Контекст: {context}' if context else ''}"},
+                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}", "detail": "low"}},
+                    ],
+                },
+            ]
+
+            if DEBUG:
+                print(f"\n{'='*70}")
+                print(f"VL IMAGE DESCRIBE (model={self.vl_model}):")
+                print(f"{'='*70}\n")
+
+            resp = self.session.post(
+                f"{self.base_url}/chat/completions",
+                json={
+                    "model": self.vl_model,
+                    "messages": messages,
+                    "temperature": 0.1,
+                    "max_tokens": 1024,
+                },
+                timeout=120,
+            )
+            resp.raise_for_status()
+            result = resp.json()
+            description = result["choices"][0]["message"]["content"].strip()
+
+            if DEBUG:
+                print(f"\n{'='*70}")
+                print(f"VL DESCRIPTION:")
+                print(description[:1000])
+                print(f"{'='*70}\n")
+
+            return description
+        except Exception as e:
+            print(f"[VL Model] Ошибка описания изображения: {e}")
+            return ""
 
     def analyze_content(self, text_content: str = "", image_path: str = "",
                         file_context: str = "", existing_categories: str = "",

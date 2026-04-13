@@ -85,18 +85,14 @@ class VideoAnalyzer(BaseAnalyzer):
             self._fill_info(info, ai_result_meta, f"Видео {' '.join(meta_parts)}")
             return info
 
-        # 3. Ключевые кадры → мультимодальная модель
+        # 3. Ключевые кадры → VL-модель → Mini-модель
         logger.info(f"  → Извлечение ключевых кадров...")
         frames = self._extract_keyframes(filepath, num_frames=2)
         if frames:
-            logger.info(f"  ← Извлечено {len(frames)} кадров, отправляю мультимодально...")
-            ai_result_frames = localai.analyze_content(
-                text_content="",
-                image_path=frames[0],
-                file_context=context_text,
-                existing_categories=existing_categories,
-            )
-            # Очистка временных кадров и каталога
+            logger.info(f"  ← Извлечено {len(frames)} кадров, VL-модель описывает...")
+            # VL-модель описывает первый кадр
+            frame_desc = localai.describe_image(frames[0], context=context_text)
+            # Очистка временных кадров
             import shutil
             if frames:
                 try:
@@ -104,10 +100,19 @@ class VideoAnalyzer(BaseAnalyzer):
                 except Exception:
                     pass
 
-            if ai_result_frames and ai_result_frames.get("category", "") not in ("Видео", "Неразобранное", "Изображения", ""):
-                logger.info(f"  ← Классифицировано по кадрам: {ai_result_frames.get('category')}")
-                self._fill_info(info, ai_result_frames, f"Видео {' '.join(meta_parts)}")
-                return info
+            if frame_desc and len(frame_desc) > 20:
+                logger.info(f"  ← Описание: {frame_desc[:150]}...")
+                # Mini-модель классифицирует по описанию
+                ai_result_frames = localai.analyze_content(
+                    text_content=frame_desc,
+                    file_context=context_text,
+                    existing_categories=existing_categories,
+                )
+                if ai_result_frames and ai_result_frames.get("category", "") not in ("Видео", "Неразобранное", "Изображения", ""):
+                    logger.info(f"  ← Классифицировано по кадрам: {ai_result_frames.get('category')}")
+                    self._fill_info(info, ai_result_frames, f"Видео {' '.join(meta_parts)}")
+                    info.ai_description = f"Видео {' '.join(meta_parts)}. Кадры: {frame_desc[:200]}"
+                    return info
 
         # 4. Речь (Whisper, первые 60 сек) → Mini-модель
         if has_audio and duration > 5:
