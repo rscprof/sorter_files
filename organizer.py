@@ -742,7 +742,13 @@ class FileOrganizer:
             return False
 
     # ── Главный запуск ───────────────────────────
-    def run(self, dry_run: bool = False, skip_diagnostics: bool = False, limit: int = 0):
+    def run(self, dry_run: bool = False, skip_diagnostics: bool = False, limit: int = 0,
+            cumulative_report: bool = False):
+        """Запустить обработку.
+        
+        cumulative_report: если True — один общий отчёт, иначе — отчёт на запуск.
+        """
+        self._cumulative_report = cumulative_report
         # ── Диагностика ──
         if not skip_diagnostics:
             diag = run_diagnostics()
@@ -953,17 +959,49 @@ class FileOrganizer:
         return "\n".join(lines)
 
     def _save_report(self):
+        """Сохранить отчёт.
+        
+        По умолчанию: именной файл на каждый запуск.
+        С --cumulative-report: один общий organizer_report.json.
+        """
+        run_id = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+        mode = "dry-run" if self._cumulative_report and self.file_infos else ""
+
         report = {
+            "run_id": run_id,
             "timestamp": datetime.now().isoformat(),
+            "mode": "DRY-RUN" if self._cumulative_report and self.file_infos else "LIVE",
             "source": str(self.source),
             "target": str(self.target),
             "total": len(self.file_infos),
             "errors": self.errors,
+            "stats": self.stats,
             "files": [fi.to_dict() for fi in self.file_infos],
         }
-        path = os.path.join(self.target, "organizer_report.json")
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(report, f, ensure_ascii=False, indent=2, default=str)
+
+        if getattr(self, '_cumulative_report', False):
+            # Один общий отчёт
+            path = os.path.join(self.target, "organizer_report.json")
+            # Дописываем в существующий или создаём новый
+            if os.path.exists(path):
+                try:
+                    with open(path, "r", encoding="utf-8") as f:
+                        existing = json.load(f)
+                    if "runs" not in existing:
+                        existing = {"runs": [existing]}
+                    existing.setdefault("runs", []).append(report)
+                    existing["total_runs"] = len(existing["runs"])
+                    report = existing
+                except Exception:
+                    pass
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(report, f, ensure_ascii=False, indent=2, default=str)
+        else:
+            # Именной файл на запуск
+            path = os.path.join(self.target, f"organizer_report_{run_id}.json")
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(report, f, ensure_ascii=False, indent=2, default=str)
+
         logger.info(f"Отчёт: {path}")
 
 
@@ -1021,6 +1059,7 @@ def main():
     parser.add_argument("--find-file", type=str, default="", help="Найти где находится файл по его оригинальному пути")
     parser.add_argument("--provenance-stats", action="store_true", help="Показать статистику provenance")
     parser.add_argument("--restore", type=str, default="", help="Восстановить файлы из organized в исходное место (путь или 'all')")
+    parser.add_argument("--cumulative-report", action="store_true", help="Один общий отчёт (по умолчанию — по запуску)")
     args = parser.parse_args()
 
     if args.reset_state:
@@ -1143,7 +1182,7 @@ def main():
         organizer._hash_index = {}
         # Переопределяем _build_hash_index чтобы не сканировал organized/ при reprocess
         organizer._build_hash_index = lambda: logger.info("Индекс дубликатов: отключён (reprocess)")
-        organizer.run(dry_run=args.dry_run, skip_diagnostics=args.no_diagnostics, limit=0)
+        organizer.run(dry_run=args.dry_run, skip_diagnostics=args.no_diagnostics, limit=0, cumulative_report=args.cumulative_report)
         return
 
     if args.cleanup:
@@ -1157,7 +1196,7 @@ def main():
         fp = os.path.abspath(os.path.expanduser(args.single_file))
         organizer.all_files = [fp]
         logger.info(f"Тест одного файла: {fp}")
-        organizer.run(dry_run=args.dry_run, skip_diagnostics=args.no_diagnostics)
+        organizer.run(dry_run=args.dry_run, skip_diagnostics=args.no_diagnostics, cumulative_report=args.cumulative_report)
     elif args.first_level_only:
         # Только файлы из корня source
         source_resolved = str(Path(args.source).resolve())
@@ -1168,10 +1207,10 @@ def main():
                     files.append(str(entry))
         organizer.all_files = files[:args.limit] if args.limit else files
         logger.info(f"Файлов первого уровня: {len(organizer.all_files)}")
-        organizer.run(dry_run=args.dry_run, skip_diagnostics=args.no_diagnostics)
+        organizer.run(dry_run=args.dry_run, skip_diagnostics=args.no_diagnostics, cumulative_report=args.cumulative_report)
     else:
         organizer.run(dry_run=args.dry_run, skip_diagnostics=args.no_diagnostics,
-                      limit=args.limit)
+                      limit=args.limit, cumulative_report=args.cumulative_report)
 
 
 if __name__ == "__main__":
