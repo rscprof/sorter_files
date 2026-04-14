@@ -21,6 +21,7 @@ from modules.archives import ArchivesAnalyzer
 from modules.audio import AudioAnalyzer
 from modules.video import VideoAnalyzer
 from modules.pdf_scans import PdfScansAnalyzer
+from modules.djvu import DjvuAnalyzer
 from modules.images import ImagesAnalyzer
 from modules.documents import DocumentsAnalyzer
 from modules.fallback import FallbackAnalyzer
@@ -34,6 +35,7 @@ ANALYZERS: list[type[BaseAnalyzer]] = sorted(
         AudioAnalyzer,              # 40
         VideoAnalyzer,              # 45
         PdfScansAnalyzer,           # 50
+        DjvuAnalyzer,               # 49
         ImagesAnalyzer,             # 60
         DocumentsAnalyzer,          # 70
         FallbackAnalyzer,           # 999

@@ -58,9 +58,56 @@ class FileOrganizer:
         self._signal_count = 0
         self._last_signal_time = 0.0
 
+        # Статистика по типам файлов
+        self.stats: dict[str, dict[str, int]] = {}
+
         # Graceful shutdown
         signal.signal(signal.SIGINT, self._handle_signal)
         signal.signal(signal.SIGTERM, self._handle_signal)
+
+    def _record_stats(self, ext: str, status: str):
+        """Записать статистику обработки файла.
+        
+        status: 'ok', 'error', 'skipped'
+        """
+        ext_upper = ext.upper() if ext else "NO_EXT"
+        if ext_upper not in self.stats:
+            self.stats[ext_upper] = {"ok": 0, "error": 0, "skipped": 0}
+        if status in self.stats[ext_upper]:
+            self.stats[ext_upper][status] += 1
+
+    def _print_stats(self):
+        """Вывести статистику по типам файлов."""
+        if not self.stats:
+            return
+
+        lines = ["", "═" * 70, "Статистика по типам файлов", "═" * 70]
+        lines.append(f"  {'Тип':<12} {'✓ OK':>6} {'✗ Error':>8} {'⏭ Skip':>7} {'Всего':>7}")
+        lines.append(f"  {'─' * 10} {'─' * 6} {'─' * 8} {'─' * 7} {'─' * 7}")
+
+        total_ok = total_err = total_skip = 0
+        for ext, counts in sorted(self.stats.items(), key=lambda x: -(x[1]["ok"] + x[1]["error"])):
+            ok = counts["ok"]
+            err = counts["error"]
+            skip = counts["skipped"]
+            total = ok + err + skip
+            total_ok += ok
+            total_err += err
+            total_skip += skip
+            lines.append(f"  {ext:<12} {ok:>6} {err:>8} {skip:>7} {total:>7}")
+
+        grand_total = total_ok + total_err + total_skip
+        lines.append(f"  {'─' * 10} {'─' * 6} {'─' * 8} {'─' * 7} {'─' * 7}")
+        lines.append(f"  {'Итого':<12} {total_ok:>6} {total_err:>8} {total_skip:>7} {grand_total:>7}")
+
+        # Процент успеха
+        if grand_total > 0:
+            pct = total_ok / grand_total * 100
+            lines.append(f"  Успех: {pct:.0f}%")
+        lines.append("═" * 70)
+
+        for line in lines:
+            logger.info(line)
 
     def _handle_signal(self, signum, frame):
         now = time.time()
@@ -774,12 +821,14 @@ class FileOrganizer:
 
             # Показываем номер ДО начала работы
             logger.info(f"  ── [{i+1}/{total}] ── {Path(fp).name}")
+            ext = Path(fp).suffix.lstrip(".")
             try:
                 # Проверка дубликата по хешу
                 fp_hash = compute_file_hash(fp)
                 if fp_hash in self._hash_index:
                     dup_path = self._hash_index[fp_hash]
                     logger.info(f"  │ ⏭ Дубликат {Path(dup_path).name} — пропускаю")
+                    self._record_stats(ext, "skipped")
                     continue
 
                 info = self.analyze_file(fp)
@@ -788,6 +837,7 @@ class FileOrganizer:
                 if self.localai.is_fatal() and not dry_run:
                     logger.error(f"\n❌ {self.localai.fatal_message()}")
                     logger.error("Обработка остановлена. State сохранён.")
+                    self._record_stats(ext, "error")
                     self._stop_requested = True
                     break
 
@@ -801,11 +851,13 @@ class FileOrganizer:
                     # Перемещаем сразу после анализа
                     self._move_single_file(info, dry_run=dry_run)
 
+                self._record_stats(ext, "ok")
                 processed_count += 1
 
             except Exception as e:
                 logger.error(f"  ✗ Ошибка: {e}")
                 self.errors.append(str(e))
+                self._record_stats(ext, "error")
 
         # 4. Итоговая статистика
         cats = {}
@@ -821,6 +873,7 @@ class FileOrganizer:
         if self._stop_requested:
             logger.info("⏹ Остановлено пользователем/state сохранён")
         logger.info(f"Ошибок: {len(self.errors)}")
+        self._print_stats()
         logger.info("Готово.")
 
         # Отчёт
