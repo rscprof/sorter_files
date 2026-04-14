@@ -701,8 +701,15 @@ class FileOrganizer:
             diag = run_diagnostics()
             print(diag.report())
             if not diag.all_ok:
-                logger.warning("Не все зависимости доступны. Продолжаю на свой страх и риск...")
-                logger.warning("Или запустите: python -m diagnostics для подробностей")
+                failed = diag.required_missing
+                if failed:
+                    logger.error(f"Критические зависимости отсутствуют: {', '.join(failed)}")
+                    logger.error("Завершаю работу. Устраните проблемы или используйте --no-diagnostics")
+                    sys.exit(1)
+                else:
+                    # Только опциональные не найдены — продолжаем
+                    opt = diag.optional_missing
+                    logger.info(f"Опционально не найдено: {', '.join(opt)}")
 
         logger.info("=" * 60)
         logger.info(f"File Organizer | {'DRY-RUN' if dry_run else 'БОЕВОЙ'}")

@@ -7,22 +7,45 @@ from pathlib import Path
 
 from models import FileInfo, ProcessingState
 
+# Типичные файлы проектов, которые могут совпадать и это нормально.
+# Не считаем их дубликатами для целей удаления.
+TYPICAL_PROJECT_FILES: set[str] = {
+    "__init__.py",
+    "package-lock.json",
+    ".npmrc",
+    ".eslintrc.json", ".eslintrc.js",
+    ".prettierrc", ".prettierrc.json",
+    ".editorconfig",
+    ".gitignore", ".gitattributes",
+    ".dockerignore", ".env.example",
+    "LICENSE", "LICENSE.md", "LICENSE.txt",
+    "COPYING", "README.md", "CHANGELOG.md",
+    "CONTRIBUTING.md", "CODE_OF_CONDUCT.md", "SECURITY.md",
+    ".gitkeep", ".keep",
+}
+
+
+def _is_protected(fi: FileInfo) -> bool:
+    """Файл защищён от удаления как дубликат."""
+    if fi.is_part_of_project:
+        return True
+    if Path(fi.filename).name in TYPICAL_PROJECT_FILES:
+        return True
+    return False
+
 
 def detect_and_handle_duplicates(
     file_infos: list[FileInfo],
     state: ProcessingState,
 ) -> list[FileInfo]:
     """
-    Найти дубликаты по хешу и принять решение для каждого.
+    Найти дубликаты по SHA-256 хешу и принять решение.
 
-    Логика:
-    - Если файл уже обработан (есть в state) — пропускаем
-    - Если несколько файлов с одинаковым хешом:
-      - Если один из них в проекте — оставляем все (часть проекта)
-      - Если один в архиве/бэкапе — удаляем остальные
-      - Иначе — оставляем самый старый, остальные помечаем на удаление
+    Правила:
+    - Защищённые файлы (проекты, типичные файлы) — НИКОГДА не дубликаты
+    - Файлы из архивов/бэкапов — оригиналы, остальные удаляются
+    - Иначе — самый старый файл остаётся, остальные на удаление
     """
-    # Группируем по хешу
     hash_groups: dict[str, list[FileInfo]] = {}
     for fi in file_infos:
         if not fi.file_hash:
@@ -32,6 +55,11 @@ def detect_and_handle_duplicates(
     results = []
     for fi in file_infos:
         if not fi.file_hash:
+            results.append(fi)
+            continue
+
+        # Защищённые — никогда не дубликаты
+        if _is_protected(fi):
             results.append(fi)
             continue
 
@@ -49,18 +77,27 @@ def detect_and_handle_duplicates(
             results.append(fi)
             continue
 
+        # Убираем защищённые из группы — они не участвуют
+        unprotected = [f for f in group if not _is_protected(f)]
+
+        if len(unprotected) <= 1:
+            # Только один незащищённый — не дубликат
+            results.append(fi)
+            continue
+
+        if fi not in unprotected:
+            results.append(fi)
+            continue
+
         # Это дубликат
         fi.is_duplicate = True
-        action = _decide_action(fi, group)
+        action = _decide_action(fi, unprotected)
         fi.duplicate_action = action
 
         if action == "delete":
-            # Указываем оригинал
-            original = _find_original(group)
+            original = _find_original(unprotected)
             fi.duplicate_of = original.original_path
             fi.should_delete = True
-        elif action == "keep_as_project_part":
-            fi.is_part_of_project = True
 
         state.register_duplicate(fi.file_hash, fi.original_path)
         results.append(fi)
@@ -69,22 +106,17 @@ def detect_and_handle_duplicates(
 
 
 def _decide_action(target: FileInfo, group: list[FileInfo]) -> str:
-    """Решить что делать с дубликатом."""
-    # Есть ли файлы из проектов?
-    project_files = [f for f in group if f.is_part_of_project or f.project_root]
-    if project_files:
-        return "keep_as_project_part"
-
-    # Есть ли в архивах/бэкапах?
-    archive_keywords = ["_архивы", "_backup", "backup", "archive", "gz/", "tar/"]
+    """Решить что делать с дубликатом.
+    
+    group — только незащищённые файлы.
+    """
+    # Файлы из архивов — оригиналы
+    archive_keywords = ["_архивы", "_backup", "backup", "archive"]
     archive_files = [f for f in group if any(kw in f.original_path.lower() for kw in archive_keywords)]
     if archive_files:
-        # Файл из архива — оригинал, остальные удаляем
-        if target in archive_files:
-            return "keep"
-        return "delete"
+        return "keep" if target in archive_files else "delete"
 
-    # Оставляем самый старый файл
+    # Самый старый файл — оригинал
     try:
         with_mtime = []
         for f in group:
