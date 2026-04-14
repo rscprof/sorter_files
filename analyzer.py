@@ -258,49 +258,63 @@ def pdf_to_images(filepath: str, max_pages: int = 5) -> list[str]:
     """
     Конвертировать PDF-страницы в JPEG-изображения.
     Возвращает список путей к временным файлам.
-    Вызывающий обязан удалить их после использования.
+    Вызывающий ОБЯЗАН удалить файлы после использования.
 
-    Qwen3.5 мультимодальная модель принимает JPEG/PNG.
-    JPEG предпочтительнее — меньше размер при кодировании в base64.
+    ВАЖНО: НЕ использует TemporaryDirectory (он удаляется при выходе).
+    Создаёт постоянный каталог в tempfile.gettempdir().
     """
     import tempfile
     images = []
+
+    # Создаём постоянный каталог (не TemporaryDirectory!)
+    tmpdir = tempfile.mkdtemp(prefix="pdf_convert_")
+
     try:
         # pdftocairo → JPEG (меньше размер, модель принимает)
-        with tempfile.TemporaryDirectory(prefix="pdf_") as tmpdir:
-            prefix = os.path.join(tmpdir, "page")
-            result = subprocess.run(
-                [
-                    "pdftocairo", "-jpeg", "-r", "150",
-                    "-f", "1", "-l", str(max_pages),
-                    filepath, prefix
-                ],
-                capture_output=True, text=True, timeout=120,
-            )
-            if result.returncode == 0:
-                for fn in sorted(os.listdir(tmpdir)):
-                    if fn.endswith(".jpg"):
-                        images.append(os.path.join(tmpdir, fn))
+        prefix = os.path.join(tmpdir, "page")
+        result = subprocess.run(
+            [
+                "pdftocairo", "-jpeg", "-r", "150",
+                "-f", "1", "-l", str(max_pages),
+                filepath, prefix
+            ],
+            capture_output=True, text=True, timeout=120,
+        )
+        if result.returncode == 0:
+            for fn in sorted(os.listdir(tmpdir)):
+                if fn.endswith(".jpg"):
+                    images.append(os.path.join(tmpdir, fn))
+            if images:
+                return images
     except (FileNotFoundError, subprocess.TimeoutExpired, Exception):
-        # Fallback: pdftoppm
-        try:
-            with tempfile.TemporaryDirectory(prefix="pdf_") as tmpdir:
-                prefix = os.path.join(tmpdir, "page")
-                result = subprocess.run(
-                    [
-                        "pdftoppm", "-jpeg", "-r", "150",
-                        "-f", "1", "-l", str(max_pages),
-                        filepath, prefix
-                    ],
-                    capture_output=True, text=True, timeout=120,
-                )
-                if result.returncode == 0:
-                    for fn in sorted(os.listdir(tmpdir)):
-                        if fn.endswith(".jpg"):
-                            images.append(os.path.join(tmpdir, fn))
-        except Exception:
-            pass
+        pass
 
+    # Fallback: pdftoppm
+    try:
+        prefix = os.path.join(tmpdir, "page")
+        result = subprocess.run(
+            [
+                "pdftoppm", "-jpeg", "-r", "150",
+                "-f", "1", "-l", str(max_pages),
+                filepath, prefix
+            ],
+            capture_output=True, text=True, timeout=120,
+        )
+        if result.returncode == 0:
+            for fn in sorted(os.listdir(tmpdir)):
+                if fn.endswith(".jpg"):
+                    images.append(os.path.join(tmpdir, fn))
+            if images:
+                return images
+    except Exception:
+        pass
+
+    # Очистка при неудаче
+    import shutil
+    try:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+    except Exception:
+        pass
     return images
 
 

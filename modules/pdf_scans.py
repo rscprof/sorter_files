@@ -60,10 +60,11 @@ class PdfScansAnalyzer(BaseAnalyzer):
         context = f"Имя: {p.name}, Каталог: {p.parent.name}"
         description = localai.describe_image(pdf_images[0], context=context)
 
-        # Очистка временных файлов
-        for img in pdf_images:
+        # Очистка временных файлов и каталога
+        import shutil
+        if pdf_images:
             try:
-                os.remove(img)
+                shutil.rmtree(os.path.dirname(pdf_images[0]), ignore_errors=True)
             except Exception:
                 pass
 
