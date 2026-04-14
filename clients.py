@@ -136,6 +136,18 @@ class LocalAIClient:
             print(f"[Directory Analysis] Ошибка: {e}")
             return {}
 
+    def is_available(self, timeout: int = 30) -> bool:
+        """Проверить доступность LocalAI (ping)."""
+        try:
+            resp = self.session.get(
+                f"{self.base_url}/models",
+                timeout=timeout,
+            )
+            resp.raise_for_status()
+            return True
+        except Exception:
+            return False
+
     def analyze_content(self, text_content: str = "", image_path: str = "",
                         file_context: str = "", existing_categories: str = "",
                         is_pdf_scan: bool = False) -> dict:

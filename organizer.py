@@ -12,6 +12,7 @@ from datetime import datetime
 from pathlib import Path
 
 import signal
+import sys
 import time
 
 from config import (
@@ -727,6 +728,18 @@ class FileOrganizer:
             pending = list(self.all_files)
 
         logger.info(f"Всего найдено: {len(self.all_files)}, к обработке: {len(pending)}")
+
+        # 1.6. Проверка доступности LocalAI (только если есть файлы и не dry-run)
+        if pending and not dry_run:
+            logger.info("Проверка доступности LocalAI...")
+            if not self.localai.is_available(timeout=30):
+                logger.error("❌ LocalAI недоступен! Проверьте:")
+                logger.error(f"   URL: {self.localai.base_url}")
+                logger.error(f"   Модель: {self.localai.model}")
+                logger.error(f"   Текст: {self.localai.text_model}")
+                logger.error("Завершаю работу.")
+                sys.exit(1)
+            logger.info("✓ LocalAI доступен")
 
         # 2. Загрузка категорий из state + сканирование target
         self._load_existing_categories()
