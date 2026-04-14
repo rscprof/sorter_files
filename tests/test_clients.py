@@ -214,6 +214,62 @@ class TestLocalAIClient:
         result = client.analyze_content(text_content="test")
         assert result == {}  # Ошибка = пустой результат
 
+    def test_consecutive_errors_fatal(self, mock_localai_server):
+        """Проверка что 3 ошибки подряд → is_fatal() = True."""
+        MockLocalAIHandler.responses = {
+            "Qwen3.5-35B-A3B-APEX-Mini.gguf": {
+                "error": {"code": 500, "message": "Server error"}
+            }
+        }
+        
+        client = LocalAIClient(
+            base_url="http://127.0.0.1:18934",
+            text_model="Qwen3.5-35B-A3B-APEX-Mini.gguf",
+            max_consecutive_errors=3,
+        )
+        
+        # 3 ошибки → fatal
+        for _ in range(3):
+            client.analyze_content(text_content="test")
+        
+        assert client.is_fatal() is True
+        assert client.consecutive_errors >= 3
+        assert "не ответил" in client.fatal_message()
+
+    def test_success_resets_error_count(self, mock_localai_server):
+        """Успешный ответ сбрасывает счётчик ошибок."""
+        MockLocalAIHandler.responses = {
+            "Qwen3.5-35B-A3B-APEX-Mini.gguf": {
+                "choices": [{"message": {"content": '{"category": "Test"}'}}]
+            }
+        }
+        
+        client = LocalAIClient(
+            base_url="http://127.0.0.1:18934",
+            text_model="Qwen3.5-35B-A3B-APEX-Mini.gguf",
+            max_consecutive_errors=3,
+        )
+        
+        # 2 ошибки
+        MockLocalAIHandler.responses = {
+            "Qwen3.5-35B-A3B-APEX-Mini.gguf": {
+                "error": {"code": 500, "message": "Error"}
+            }
+        }
+        client.analyze_content(text_content="test")
+        client.analyze_content(text_content="test")
+        assert client.consecutive_errors == 2
+        
+        # Успех → сброс
+        MockLocalAIHandler.responses = {
+            "Qwen3.5-35B-A3B-APEX-Mini.gguf": {
+                "choices": [{"message": {"content": '{"category": "Test"}'}}]
+            }
+        }
+        client.analyze_content(text_content="test")
+        assert client.consecutive_errors == 0
+        assert client.is_fatal() is False
+
 
 class TestSearXNGClient:
     def test_search(self):

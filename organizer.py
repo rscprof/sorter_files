@@ -245,6 +245,13 @@ class FileOrganizer:
             try:
                 logger.info(f"{indent}  └─ 📄 {Path(fp).name}")
                 ei = self.analyze_file(fp)
+
+                # Проверка: LocalAI перестал отвечать
+                if self.localai.is_fatal() and not dry_run:
+                    logger.error(f"\n❌ {self.localai.fatal_message()}")
+                    self._stop_requested = True
+                    return
+
                 self.file_infos.append(ei)
                 self._print_decision(ei, dry_run=dry_run)
 
@@ -769,6 +776,14 @@ class FileOrganizer:
                     continue
 
                 info = self.analyze_file(fp)
+
+                # Проверка: LocalAI перестал отвечать
+                if self.localai.is_fatal() and not dry_run:
+                    logger.error(f"\n❌ {self.localai.fatal_message()}")
+                    logger.error("Обработка остановлена. State сохранён.")
+                    self._stop_requested = True
+                    break
+
                 self.file_infos.append(info)
                 self._print_decision(info, dry_run=dry_run)
 

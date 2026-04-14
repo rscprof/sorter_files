@@ -23,13 +23,30 @@ class LocalAIClient:
     def __init__(self, base_url: str = LOCALAI_URL,
                  model: str = LOCALAI_MODEL,
                  text_model: str = LOCALAI_TEXT_MODEL,
-                 vl_model: str = LOCALAI_VL_MODEL):
+                 vl_model: str = LOCALAI_VL_MODEL,
+                 max_consecutive_errors: int = 3):
         self.base_url = base_url.rstrip("/")
         self.model = model  # мультимодальная (изображения)
         self.text_model = text_model  # только текст (быстрее)
         self.vl_model = vl_model  # vision-language (описание изображений)
         self.session = requests.Session()
         self.session.timeout = 180
+        self.max_consecutive_errors = max_consecutive_errors
+        self.consecutive_errors = 0  # счётчик подряд идущих ошибок
+
+    def _record_error(self):
+        self.consecutive_errors += 1
+
+    def _record_success(self):
+        self.consecutive_errors = 0
+
+    def is_fatal(self) -> bool:
+        """True если LocalAI перестал отвечать (превышен лимит ошибок)."""
+        return self.consecutive_errors >= self.max_consecutive_errors
+
+    def fatal_message(self) -> str:
+        return (f"LocalAI не ответил {self.consecutive_errors} раз подряд. "
+                f"Сервер недоступен: {self.base_url}")
 
     def describe_image(self, image_path: str, context: str = "") -> str:
         """Описать изображение через VL-модель. Возвращает текст описания."""
@@ -78,7 +95,8 @@ class LocalAIClient:
 
             return description
         except Exception as e:
-            print(f"[VL Model] Ошибка описания изображения: {e}")
+            self._record_error()
+            print(f"[VL Model] Ошибка описания изображения: {e} (ошибок подряд: {self.consecutive_errors})")
             return ""
 
     def analyze_directory(self, dir_listing: str, dir_path: str = "") -> dict:
@@ -133,7 +151,8 @@ class LocalAIClient:
                 return data
             return {}
         except Exception as e:
-            print(f"[Directory Analysis] Ошибка: {e}")
+            self._record_error()
+            print(f"[Directory Analysis] Ошибка: {e} (ошибок подряд: {self.consecutive_errors})")
             return {}
 
     def is_available(self, timeout: int = 30) -> bool:
@@ -236,6 +255,9 @@ class LocalAIClient:
             result = resp.json()
             content = result["choices"][0]["message"]["content"]
 
+            # Успех — сбрасываем счётчик ошибок
+            self._record_success()
+
             # DEBUG: распарсенный ответ
             if DEBUG:
                 print(f"\n{'='*70}")
@@ -244,8 +266,13 @@ class LocalAIClient:
                 print(f"{'='*70}\n")
 
             return self._parse_json_response(content)
+        except requests.exceptions.Timeout:
+            self._record_error()
+            print(f"[LocalAI] Таймаут (>600с), пропуск AI-анализа (ошибок подряд: {self.consecutive_errors})")
+            return {}
         except Exception as e:
-            print(f"[LocalAI] Ошибка: {e}")
+            self._record_error()
+            print(f"[LocalAI] Ошибка: {e} (ошибок подряд: {self.consecutive_errors})")
             return {}
 
     def transcribe_audio(self, filepath: str, model: str = "whisperx-tiny") -> str:
@@ -266,10 +293,12 @@ class LocalAIClient:
                 result = resp.json()
                 return result.get("text", "")
         except requests.exceptions.Timeout:
-            print(f"[LocalAI] Таймаут транскрипции {filepath}")
+            self._record_error()
+            print(f"[LocalAI] Таймаут транскрипции {filepath} (ошибок подряд: {self.consecutive_errors})")
             return ""
         except Exception as e:
-            print(f"[LocalAI] Ошибка транскрипции {filepath}: {e}")
+            self._record_error()
+            print(f"[LocalAI] Ошибка транскрипции {filepath}: {e} (ошибок подряд: {self.consecutive_errors})")
             return ""
 
     def _build_text_prompt(self, text: str, context: str, existing_categories: str = "") -> str:
