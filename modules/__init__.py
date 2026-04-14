@@ -24,6 +24,7 @@ from modules.pdf_scans import PdfScansAnalyzer
 from modules.djvu import DjvuAnalyzer
 from modules.images import ImagesAnalyzer
 from modules.documents import DocumentsAnalyzer
+from modules.fb2 import Fb2Analyzer
 from modules.fallback import FallbackAnalyzer
 
 # Все анализаторы, отсортированные по приоритету
@@ -38,6 +39,7 @@ ANALYZERS: list[type[BaseAnalyzer]] = sorted(
         DjvuAnalyzer,               # 49
         ImagesAnalyzer,             # 60
         DocumentsAnalyzer,          # 70
+        Fb2Analyzer,                # 71
         FallbackAnalyzer,           # 999
     ],
     key=lambda cls: cls().priority,

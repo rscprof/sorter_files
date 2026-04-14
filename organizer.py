@@ -86,6 +86,8 @@ class FileOrganizer:
         lines.append(f"  {'─' * 10} {'─' * 6} {'─' * 8} {'─' * 7} {'─' * 7}")
 
         total_ok = total_err = total_skip = 0
+        unknown_exts = []
+        
         for ext, counts in sorted(self.stats.items(), key=lambda x: -(x[1]["ok"] + x[1]["error"])):
             ok = counts["ok"]
             err = counts["error"]
@@ -94,6 +96,11 @@ class FileOrganizer:
             total_ok += ok
             total_err += err
             total_skip += skip
+            
+            # Собираем неизвестные форматы
+            if ok == 0 and err == 0 and skip == 0:
+                unknown_exts.append(ext)
+            
             lines.append(f"  {ext:<12} {ok:>6} {err:>8} {skip:>7} {total:>7}")
 
         grand_total = total_ok + total_err + total_skip
@@ -104,6 +111,11 @@ class FileOrganizer:
         if grand_total > 0:
             pct = total_ok / grand_total * 100
             lines.append(f"  Успех: {pct:.0f}%")
+        
+        # Неизвестные форматы
+        if unknown_exts:
+            lines.append(f"  Неизвестные форматы: {', '.join(unknown_exts)}")
+        
         lines.append("═" * 70)
 
         for line in lines:
