@@ -921,8 +921,17 @@ class FileOrganizer:
             logger.info(f"  {cat}: {n}")
 
         self.state.save()
-        if self._stop_requested:
-            logger.info("⏹ Остановлено пользователем/state сохранён")
+        
+        # Определяем причину завершения
+        stop_reason = self.localai.get_stop_reason()
+        if stop_reason:
+            logger.error(f"❌ {stop_reason}")
+            logger.error("Обработка остановлена из-за накопленных ошибок LocalAI.")
+        elif self._stop_requested:
+            logger.info("⏹ Остановлено пользователем")
+        else:
+            logger.info("✓ Обработка завершена успешно")
+        
         logger.info(f"Ошибок: {len(self.errors)}")
         self._print_stats()
         logger.info("Готово.")
