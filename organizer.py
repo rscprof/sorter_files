@@ -282,23 +282,28 @@ class FileOrganizer:
             fp = os.path.join(extract_dir, ef)
             if not os.path.isfile(fp):
                 continue
+            fp_ext = Path(fp).suffix.lstrip(".")
             # Пропускаем временные файлы
             if is_temp_file(fp):
                 logger.info(f"{indent}  🗑️ Временный файл: {Path(fp).name}")
+                self._record_stats(fp_ext, "skipped")
                 continue
             files_to_process.append(fp)
 
         for fp in files_to_process:
+            fp_ext = Path(fp).suffix.lstrip(".")
             # Проверяем дубликаты
             fp_hash = compute_file_hash(fp)
             if fp_hash in self._hash_index:
                 dup_path = self._hash_index[fp_hash]
                 logger.info(f"{indent}  ⏭ {Path(fp).name} — дубликат {Path(dup_path).name}")
+                self._record_stats(fp_ext, "skipped")
                 continue
             if self.state.is_already_processed(fp_hash):
                 prev = self.state.get_processed_info(fp_hash)
                 if prev and prev.get("target_path"):
                     logger.info(f"{indent}  ⏭ {Path(fp).name} — уже обработан")
+                    self._record_stats(fp_ext, "skipped")
                     continue
 
             try:
@@ -308,6 +313,7 @@ class FileOrganizer:
                 # Проверка: LocalAI перестал отвечать
                 if self.localai.is_fatal() and not dry_run:
                     logger.error(f"\n❌ {self.localai.fatal_message()}")
+                    self._record_stats(fp_ext, "error")
                     self._stop_requested = True
                     return
 
@@ -321,9 +327,12 @@ class FileOrganizer:
                     self._move_single_file(ei, dry_run=dry_run,
                                            archive_source=archive_info.original_path,
                                            archive_extract_dir=extract_dir)
+
+                self._record_stats(fp_ext, "ok")
             except Exception as e:
                 logger.error(f"{indent}  ✗ Ошибка обработки {fp}: {e}")
                 self.errors.append(str(e))
+                self._record_stats(fp_ext, "error")
 
         # Перемещаем сам архив после обработки содержимого
         self._move_single_file(archive_info, dry_run=dry_run)
