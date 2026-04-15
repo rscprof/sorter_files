@@ -22,9 +22,7 @@ class DistributablesAnalyzer(BaseAnalyzer):
         return "distributables"
 
     def can_handle(self, filepath: str) -> bool:
-        from pathlib import Path
-        ext = Path(filepath).suffix.lower().lstrip(".")
-        return is_executable(filepath) or ext in EXECUTABLE_EXTS or ext == "iso"
+        return is_executable(filepath)
 
     def analyze(self, filepath: str, existing_context: dict) -> Optional[FileInfo]:
         searxng = existing_context.get("searxng")

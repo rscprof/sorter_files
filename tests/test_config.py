@@ -90,11 +90,11 @@ class TestExtensionSets:
         assert len(IMAGE_EXTS) > 0
 
     def test_common_archive_exts(self):
-        for ext in ["zip", "tar", "gz", "7z", "rar", "tgz"]:
+        for ext in ["zip", "tar", "gz", "7z", "rar", "tgz", "iso"]:
             assert ext in ARCHIVE_EXTS
 
     def test_common_executable_exts(self):
-        for ext in ["exe", "msi", "dmg", "deb", "rpm", "apk", "iso"]:
+        for ext in ["exe", "msi", "dmg", "deb", "rpm", "apk"]:
             assert ext in EXECUTABLE_EXTS
 
     def test_common_image_exts(self):

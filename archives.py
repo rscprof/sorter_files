@@ -11,7 +11,13 @@ logger = logging.getLogger(__name__)
 
 
 def extract_archive(filepath: str, target_dir: str) -> list[str]:
-    """Распаковать архив, вернуть список извлечённых файлов."""
+    """Распаковать архив или образ, вернуть список извлечённых файлов.
+    
+    Поддерживаемые форматы:
+    - zip, rar, 7z — через нативные библиотеки/утилиты
+    - tar, tar.gz, tar.bz2, tar.xz, tgz — через tarfile
+    - iso — через 7z (CD/DVD образы)
+    """
     ext = Path(filepath).suffix.lower().lstrip(".")
     os.makedirs(target_dir, exist_ok=True)
 
@@ -20,39 +26,43 @@ def extract_archive(filepath: str, target_dir: str) -> list[str]:
             import zipfile
             with zipfile.ZipFile(filepath, "r") as zf:
                 zf.extractall(target_dir)
-                return zf.namelist()
+                return [os.path.join(target_dir, n) for n in zf.namelist()]
 
         elif ext in ("tar", "gz", "bz2", "xz", "tgz"):
             import tarfile
             mode = "r:*" if ext in ("gz", "tgz") else "r"
             with tarfile.open(filepath, mode) as tf:
                 tf.extractall(target_dir)
-                return tf.getnames()
+                return [os.path.join(target_dir, n) for n in tf.getnames()]
 
-        elif ext == "7z":
+        elif ext in ("7z", "iso"):
+            # 7z может распаковать и .iso образы дисков
             result = subprocess.run(
                 ["7z", "x", filepath, f"-o{target_dir}", "-y"],
-                capture_output=True, text=True, timeout=300,
+                capture_output=True, text=True, timeout=600,
             )
             if result.returncode == 0:
-                return [
-                    line.split()[-1]
-                    for line in result.stdout.splitlines()
-                    if line.startswith("Extracting")
-                ]
-            logger.error(f"7z error: {result.stderr}")
+                extracted = []
+                for root, dirs, files in os.walk(target_dir):
+                    for fn in files:
+                        extracted.append(os.path.join(root, fn))
+                return extracted
+            else:
+                logger.error(f"7z error for {filepath}: {result.stderr}")
 
         elif ext == "rar":
             result = subprocess.run(
                 ["unrar", "x", filepath, target_dir, "-y"],
-                capture_output=True, text=True, timeout=300,
+                capture_output=True, text=True, timeout=600,
             )
             if result.returncode == 0:
-                return [
-                    l.strip() for l in result.stdout.splitlines()
-                    if l.strip() and not l.startswith("UNRAR")
-                ]
-            logger.error(f"unrar error: {result.stderr}")
+                extracted = []
+                for root, dirs, files in os.walk(target_dir):
+                    for fn in files:
+                        extracted.append(os.path.join(root, fn))
+                return extracted
+            else:
+                logger.error(f"unrar error for {filepath}: {result.stderr}")
 
     except Exception as e:
         logger.error(f"Ошибка распаковки {filepath}: {e}")

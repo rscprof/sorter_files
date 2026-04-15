@@ -1,8 +1,6 @@
 {
     "_comment": "Example configuration. Copy to config.local.json and edit values.",
-
     "language": "en",
-
     "localai": {
         "url": "http://localhost:11434/v1",
         "model": "qwen3.5-35b-a3b-apex",
@@ -12,15 +10,34 @@
         "max_tokens": 4096,
         "temperature": 0.15
     },
-
     "searxng": {
         "url": "http://localhost:8080"
     },
-
     "paths": {
         "source": "~/my_files",
         "target": "~/organized"
     },
-
-    "state_dir": "~/.local/state/file-organizer"
+    "state_dir": "~/.local/state/file-organizer",
+    "extensions": {
+        "archive": [
+            "zip",
+            "rar",
+            "7z",
+            "tar",
+            "gz",
+            "bz2",
+            "xz",
+            "tgz",
+            "iso"
+        ],
+        "executable": [
+            "exe",
+            "msi",
+            "dmg",
+            "deb",
+            "rpm",
+            "apk",
+            "appimage"
+        ]
+    }
 }

@@ -68,3 +68,13 @@ class TestExtractNonexistent:
         f.write_text("not an archive")
         extracted = extract_archive(str(f), str(tmp_path / "extracted"))
         assert extracted == []
+
+    def test_iso_listed_as_archive(self):
+        """ISO должен быть в ARCHIVE_EXTS."""
+        from config import ARCHIVE_EXTS
+        assert "iso" in ARCHIVE_EXTS
+
+    def test_iso_not_in_executable(self):
+        """ISO НЕ должен быть в EXECUTABLE_EXTS."""
+        from config import EXECUTABLE_EXTS
+        assert "iso" not in EXECUTABLE_EXTS

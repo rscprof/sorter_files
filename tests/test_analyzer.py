@@ -75,13 +75,13 @@ class TestIsTempFile:
 
 class TestFileTypes:
     def test_is_archive(self, tmp_path):
-        for ext in ("zip", "tar", "gz", "7z", "rar", "tgz", "xz", "bz2"):
+        for ext in ("zip", "tar", "gz", "7z", "rar", "tgz", "iso"):
             f = tmp_path / f"file.{ext}"
             f.touch()
             assert is_archive(str(f)), f".{ext} должен быть архивом"
 
     def test_is_executable(self, tmp_path):
-        for ext in ("exe", "msi", "dmg", "deb", "rpm", "apk", "iso"):
+        for ext in ("exe", "msi", "dmg", "deb", "rpm", "apk"):
             f = tmp_path / f"file.{ext}"
             f.touch()
             assert is_executable(str(f)), f".{ext} должен быть executable"

@@ -72,8 +72,8 @@ DEFAULTS: dict[str, Any] = {
     },
 
     "extensions": {
-        "archive": ["zip", "rar", "7z", "tar", "gz", "bz2", "xz", "tgz"],
-        "executable": ["exe", "msi", "dmg", "deb", "rpm", "apk", "appimage", "iso"],
+        "archive": ["zip", "rar", "7z", "tar", "gz", "bz2", "xz", "tgz", "iso"],
+        "executable": ["exe", "msi", "dmg", "deb", "rpm", "apk", "appimage"],
         "image": ["jpg", "jpeg", "png", "gif", "bmp", "svg", "webp", "tiff", "ico", "heic", "heif", "raw", "cr2", "nef", "arw"],
         "audio": ["ogg", "mp3", "wav", "flac", "aac", "wma", "m4a", "opus", "aiff"],
         "video": ["mp4", "avi", "mkv", "mov", "wmv", "flv", "webm", "m4v", "3gp", "mpg", "mpeg"],
