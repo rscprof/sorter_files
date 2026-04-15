@@ -30,14 +30,38 @@ from modules import get_analyzers
 from projects import find_project_root, is_build_artifact, is_project_directory, get_directory_listing
 from provenance import ProvenanceStore
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler("organizer.log", encoding="utf-8"),
-    ],
-)
+# ── Логирование (настраивается в main()) ──────────────────────────
+LOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
+os.makedirs(LOG_DIR, exist_ok=True)
+
+def _setup_logging(cumulative_log: bool = False, debug: bool = False):
+    """Настроить логирование.
+    
+    cumulative_log=False (по умолчанию): отдельный файл на запуск
+    cumulative_log=True: один общий organizer.log
+    """
+    if cumulative_log:
+        log_file = os.path.join(LOG_DIR, "organizer.log")
+    else:
+        run_id = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+        log_file = os.path.join(LOG_DIR, f"organizer_{run_id}.log")
+
+    # Убираем старые хендлеры (для повторных вызовов)
+    root_logger = logging.getLogger()
+    if root_logger.handlers:
+        root_logger.handlers.clear()
+
+    level = logging.DEBUG if debug else logging.INFO
+    logging.basicConfig(
+        level=level,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        handlers=[
+            logging.StreamHandler(),
+            logging.FileHandler(log_file, encoding="utf-8"),
+        ],
+    )
+    return log_file
+
 logger = logging.getLogger(__name__)
 
 
@@ -1081,7 +1105,11 @@ def main():
     parser.add_argument("--provenance-stats", action="store_true", help="Показать статистику provenance")
     parser.add_argument("--restore", type=str, default="", help="Восстановить файлы из organized в исходное место (путь или 'all')")
     parser.add_argument("--cumulative-report", action="store_true", help="Один общий отчёт (по умолчанию — по запуску)")
+    parser.add_argument("--cumulative-log", action="store_true", help="Один общий лог organizer.log (по умолчанию — по запуску)")
     args = parser.parse_args()
+
+    # Логирование настраивается ДО всего остального
+    log_file = _setup_logging(cumulative_log=args.cumulative_log, debug=args.debug)
 
     if args.reset_state:
         state_path = os.path.join(STATE_DIR, "state.json")
@@ -1089,7 +1117,8 @@ def main():
             os.remove(state_path)
             logger.info("State сброшен")
 
-    # DEBUG — ДО reprocess/cleanup, иначе return пропустит
+    # Логирование уже настроено выше
+    logger.info(f"Лог: {log_file}")
     import clients
     if args.debug:
         clients.DEBUG = True

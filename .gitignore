@@ -15,11 +15,11 @@ config.local.json
 
 # State and logs
 state.json
-organizer.log
+logs/
 *.log
 
 # Generated reports
-organizer_report.json
+organizer_report*.json
 
 # Build artifacts
 dist/
