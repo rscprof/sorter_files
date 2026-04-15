@@ -17,6 +17,8 @@ DEFAULTS: dict[str, Any] = {
         "model": "qwen3.5-35b-a3b-apex",
         "text_model": "Qwen3.5-35B-A3B-APEX-Mini.gguf",
         "vl_model": "qwen3-vl-4b-instruct",
+        "fallback_model": "",  # резервная мультимодальная модель (опционально)
+        "fallback_text_model": "",  # резервная текстовая модель (опционально)
         "timeout": 600,
         "max_tokens": 4096,
         "temperature": 0.15,
@@ -141,6 +143,8 @@ LOCALAI_URL: str = _config.get("localai", {}).get("url", DEFAULTS["localai"]["ur
 LOCALAI_MODEL: str = _config.get("localai", {}).get("model", DEFAULTS["localai"]["model"])
 LOCALAI_TEXT_MODEL: str = _config.get("localai", {}).get("text_model", DEFAULTS["localai"]["text_model"])
 LOCALAI_VL_MODEL: str = _config.get("localai", {}).get("vl_model", DEFAULTS["localai"]["vl_model"])
+LOCALAI_FALLBACK_MODEL: str = _config.get("localai", {}).get("fallback_model", DEFAULTS["localai"]["fallback_model"])
+LOCALAI_FALLBACK_TEXT_MODEL: str = _config.get("localai", {}).get("fallback_text_model", DEFAULTS["localai"]["fallback_text_model"])
 
 SEARXNG_URL: str = _config.get("searxng", {}).get("url", DEFAULTS["searxng"]["url"])
 

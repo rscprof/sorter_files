@@ -11,7 +11,7 @@ from typing import Optional
 
 import requests
 
-from config import LOCALAI_URL, LOCALAI_MODEL, LOCALAI_TEXT_MODEL, LOCALAI_VL_MODEL, SEARXNG_URL
+from config import LOCALAI_URL, LOCALAI_MODEL, LOCALAI_TEXT_MODEL, LOCALAI_VL_MODEL, SEARXNG_URL, LOCALAI_FALLBACK_MODEL, LOCALAI_FALLBACK_TEXT_MODEL
 
 logger = logging.getLogger(__name__)
 DEBUG = os.getenv("DEBUG", "").lower() in ("1", "true", "yes")
@@ -24,80 +24,112 @@ class LocalAIClient:
                  model: str = LOCALAI_MODEL,
                  text_model: str = LOCALAI_TEXT_MODEL,
                  vl_model: str = LOCALAI_VL_MODEL,
-                 max_consecutive_errors: int = 3):
+                 fallback_model: str = LOCALAI_FALLBACK_MODEL,
+                 fallback_text_model: str = LOCALAI_FALLBACK_TEXT_MODEL,
+                 max_consecutive_errors: int = 3,
+                 max_retries: int = 2,
+                 retry_delay: float = 1.0):
         self.base_url = base_url.rstrip("/")
         self.model = model  # мультимодальная (изображения)
         self.text_model = text_model  # только текст (быстрее)
         self.vl_model = vl_model  # vision-language (описание изображений)
+        self.fallback_model = fallback_model  # резервная мультимодальная
+        self.fallback_text_model = fallback_text_model  # резервная текстовая
         self.session = requests.Session()
         self.session.timeout = 180
         self.max_consecutive_errors = max_consecutive_errors
         self.consecutive_errors = 0  # счётчик подряд идущих ошибок
+        self.max_retries = max_retries
+        self.retry_delay = retry_delay
+        self._last_error_reason = None  # причина последней ошибки
 
-    def _record_error(self):
+    def _record_error(self, reason: str = ""):
         self.consecutive_errors += 1
+        if reason:
+            self._last_error_reason = reason
 
     def _record_success(self):
         self.consecutive_errors = 0
+        self._last_error_reason = None
 
     def is_fatal(self) -> bool:
         """True если LocalAI перестал отвечать (превышен лимит ошибок)."""
         return self.consecutive_errors >= self.max_consecutive_errors
 
     def fatal_message(self) -> str:
+        reason_detail = f" Последняя ошибка: {self._last_error_reason}" if self._last_error_reason else ""
         return (f"LocalAI не ответил {self.consecutive_errors} раз подряд. "
-                f"Сервер недоступен: {self.base_url}")
+                f"Сервер недоступен: {self.base_url}.{reason_detail}")
+
+    def get_stop_reason(self) -> str:
+        """Возвращает причину остановки: накопленные ошибки или пользовательский запрос."""
+        if self.is_fatal():
+            return self.fatal_message()
+        return ""
 
     def describe_image(self, image_path: str, context: str = "") -> str:
         """Описать изображение через VL-модель. Возвращает текст описания."""
-        try:
-            with open(image_path, "rb") as f:
-                img_b64 = base64.b64encode(f.read()).decode()
+        import time
+        last_exception = None
+        
+        for attempt in range(self.max_retries + 1):
+            try:
+                with open(image_path, "rb") as f:
+                    img_b64 = base64.b64encode(f.read()).decode()
 
-            messages = [
-                {
-                    "role": "system",
-                    "content": "Опиши подробно что видно на изображении. Пиши на русском языке. Включай текст если он есть на картинке, людей, объекты, сцену."
-                },
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": f"Опиши это изображение.{f' Контекст: {context}' if context else ''}"},
-                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}", "detail": "low"}},
-                    ],
-                },
-            ]
+                messages = [
+                    {
+                        "role": "system",
+                        "content": "Опиши подробно что видно на изображении. Пиши на русском языке. Включай текст если он есть на картинке, людей, объекты, сцену."
+                    },
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": f"Опиши это изображение.{f' Контекст: {context}' if context else ''}"},
+                            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}", "detail": "low"}},
+                        ],
+                    },
+                ]
 
-            if DEBUG:
-                print(f"\n{'='*70}")
-                print(f"VL IMAGE DESCRIBE (model={self.vl_model}):")
-                print(f"{'='*70}\n")
+                if DEBUG:
+                    print(f"\n{'='*70}")
+                    print(f"VL IMAGE DESCRIBE (model={self.vl_model}, attempt={attempt+1}):")
+                    print(f"{'='*70}\n")
 
-            resp = self.session.post(
-                f"{self.base_url}/chat/completions",
-                json={
-                    "model": self.vl_model,
-                    "messages": messages,
-                    "temperature": 0.1,
-                    "max_tokens": 1024,
-                },
-                timeout=120,
-            )
-            resp.raise_for_status()
-            result = resp.json()
-            description = result["choices"][0]["message"]["content"].strip()
+                resp = self.session.post(
+                    f"{self.base_url}/chat/completions",
+                    json={
+                        "model": self.vl_model,
+                        "messages": messages,
+                        "temperature": 0.1,
+                        "max_tokens": 1024,
+                    },
+                    timeout=120,
+                )
+                resp.raise_for_status()
+                result = resp.json()
+                description = result["choices"][0]["message"]["content"].strip()
 
-            if DEBUG:
-                print(f"\n{'='*70}")
-                print(f"VL DESCRIPTION:")
-                print(description[:1000])
-                print(f"{'='*70}\n")
+                if DEBUG:
+                    print(f"\n{'='*70}")
+                    print(f"VL DESCRIPTION:")
+                    print(description[:1000])
+                    print(f"{'='*70}\n")
 
-            return description
-        except Exception as e:
-            self._record_error()
-            print(f"[VL Model] Ошибка описания изображения: {e} (ошибок подряд: {self.consecutive_errors})")
-            return ""
+                self._record_success()
+                return description
+            except Exception as e:
+                last_exception = e
+                if attempt < self.max_retries:
+                    logger.warning(f"[VL Model] Попытка {attempt+1} не удалась: {e}. Повтор через {self.retry_delay}s...")
+                    time.sleep(self.retry_delay)
+                else:
+                    self._record_error(str(e))
+                    print(f"[VL Model] Ошибка описания изображения после {self.max_retries+1} попыток: {e} (ошибок подряд: {self.consecutive_errors})")
+                    return ""
+        
+        self._record_error(str(last_exception))
+        return ""
 
     def analyze_directory(self, dir_listing: str, dir_path: str = "") -> dict:
         """
@@ -105,6 +137,7 @@ class LocalAIClient:
         Возвращает: is_project (bool), project_name (str), 
                     files_to_delete (list), reasoning (str)
         """
+        import time
         prompt = f"""Проанализируй содержимое каталога и ответь в JSON:
 {{
   "is_project": true/false,
@@ -120,40 +153,57 @@ class LocalAIClient:
 
 Отвечай ТОЛЬКО валидным JSON."""
 
-        try:
-            if DEBUG:
-                print(f"\n{'='*70}")
-                print(f"DIRECTORY ANALYSIS (model={self.text_model}):")
-                print(dir_listing[:1000])
-                print(f"{'='*70}\n")
+        last_exception = None
+        # Используем fallback если основная модель не работает
+        models_to_try = [self.text_model]
+        if self.fallback_text_model and self.fallback_text_model != self.text_model:
+            models_to_try.append(self.fallback_text_model)
+        
+        for attempt in range(self.max_retries + 1):
+            for model in models_to_try:
+                try:
+                    if DEBUG:
+                        print(f"\n{'='*70}")
+                        print(f"DIRECTORY ANALYSIS (model={model}, attempt={attempt+1}):")
+                        print(dir_listing[:1000])
+                        print(f"{'='*70}\n")
 
-            resp = self.session.post(
-                f"{self.base_url}/chat/completions",
-                json={
-                    "model": self.text_model,
-                    "messages": [{"role": "user", "content": prompt}],
-                    "temperature": 0.1,
-                    "max_tokens": 1024,
-                },
-                timeout=120,
-            )
-            resp.raise_for_status()
-            result = resp.json()
-            content = result["choices"][0]["message"]["content"].strip()
+                    resp = self.session.post(
+                        f"{self.base_url}/chat/completions",
+                        json={
+                            "model": model,
+                            "messages": [{"role": "user", "content": prompt}],
+                            "temperature": 0.1,
+                            "max_tokens": 1024,
+                        },
+                        timeout=120,
+                    )
+                    resp.raise_for_status()
+                    result = resp.json()
+                    content = result["choices"][0]["message"]["content"].strip()
 
-            # Парсим JSON
-            import re
-            json_match = re.search(r"\{[\s\S]*\}", content)
-            if json_match:
-                data = json.loads(json_match.group())
-                if DEBUG:
-                    print(f"DIR ANALYSIS RESULT: {json.dumps(data, indent=2, ensure_ascii=False)}")
-                return data
-            return {}
-        except Exception as e:
-            self._record_error()
-            print(f"[Directory Analysis] Ошибка: {e} (ошибок подряд: {self.consecutive_errors})")
-            return {}
+                    # Парсим JSON
+                    import re
+                    json_match = re.search(r"\{[\s\S]*\}", content)
+                    if json_match:
+                        data = json.loads(json_match.group())
+                        if DEBUG:
+                            print(f"DIR ANALYSIS RESULT: {json.dumps(data, indent=2, ensure_ascii=False)}")
+                        self._record_success()
+                        return data
+                    return {}
+                except Exception as e:
+                    last_exception = e
+                    logger.warning(f"[Directory Analysis] Модель {model} не удалась: {e}")
+                    continue
+            
+            if attempt < self.max_retries:
+                logger.warning(f"[Directory Analysis] Попытка {attempt+1} не удалась. Повтор через {self.retry_delay}s...")
+                time.sleep(self.retry_delay)
+        
+        self._record_error(str(last_exception))
+        print(f"[Directory Analysis] Ошибка после {self.max_retries+1} попыток: {last_exception} (ошибок подряд: {self.consecutive_errors})")
+        return {}
 
     def is_available(self, timeout: int = 30) -> bool:
         """Проверить доступность LocalAI (ping)."""
@@ -266,40 +316,58 @@ class LocalAIClient:
                 print(f"{'='*70}\n")
 
             return self._parse_json_response(content)
-        except requests.exceptions.Timeout:
-            self._record_error()
-            print(f"[LocalAI] Таймаут (>600с), пропуск AI-анализа (ошибок подряд: {self.consecutive_errors})")
+        except requests.exceptions.Timeout as e:
+            self._record_error("Timeout")
+            logger.warning(f"[LocalAI] Таймаут (>600с), пропуск AI-анализа (ошибок подряд: {self.consecutive_errors})")
             return {}
         except Exception as e:
-            self._record_error()
-            print(f"[LocalAI] Ошибка: {e} (ошибок подряд: {self.consecutive_errors})")
+            self._record_error(str(e))
+            logger.warning(f"[LocalAI] Ошибка: {e} (ошибок подряд: {self.consecutive_errors})")
             return {}
 
     def transcribe_audio(self, filepath: str, model: str = "whisperx-tiny") -> str:
         """Транскрибировать аудио через Whisper-модель в LocalAI."""
         import os
-        try:
-            fname = os.path.basename(filepath)
-            with open(filepath, "rb") as f:
-                files = {"file": (fname, f, "application/octet-stream")}
-                data = {"model": model}
-                resp = self.session.post(
-                    f"{self.base_url}/audio/transcriptions",
-                    files=files,
-                    data=data,
-                    timeout=300,
-                )
-                resp.raise_for_status()
-                result = resp.json()
-                return result.get("text", "")
-        except requests.exceptions.Timeout:
-            self._record_error()
-            print(f"[LocalAI] Таймаут транскрипции {filepath} (ошибок подряд: {self.consecutive_errors})")
-            return ""
-        except Exception as e:
-            self._record_error()
-            print(f"[LocalAI] Ошибка транскрипции {filepath}: {e} (ошибок подряд: {self.consecutive_errors})")
-            return ""
+        import time
+        
+        last_exception = None
+        for attempt in range(self.max_retries + 1):
+            try:
+                fname = os.path.basename(filepath)
+                with open(filepath, "rb") as f:
+                    files = {"file": (fname, f, "application/octet-stream")}
+                    data = {"model": model}
+                    resp = self.session.post(
+                        f"{self.base_url}/audio/transcriptions",
+                        files=files,
+                        data=data,
+                        timeout=300,
+                    )
+                    resp.raise_for_status()
+                    result = resp.json()
+                    self._record_success()
+                    return result.get("text", "")
+            except requests.exceptions.Timeout as e:
+                last_exception = e
+                if attempt < self.max_retries:
+                    logger.warning(f"[LocalAI] Таймаут транскрипции {filepath}, попытка {attempt+1}. Повтор через {self.retry_delay}s...")
+                    time.sleep(self.retry_delay)
+                else:
+                    self._record_error("Timeout")
+                    print(f"[LocalAI] Таймаут транскрипции {filepath} после {self.max_retries+1} попыток (ошибок подряд: {self.consecutive_errors})")
+                    return ""
+            except Exception as e:
+                last_exception = e
+                if attempt < self.max_retries:
+                    logger.warning(f"[LocalAI] Ошибка транскрипции {filepath}, попытка {attempt+1}: {e}. Повтор через {self.retry_delay}s...")
+                    time.sleep(self.retry_delay)
+                else:
+                    self._record_error(str(e))
+                    print(f"[LocalAI] Ошибка транскрипции {filepath} после {self.max_retries+1} попыток: {e} (ошибок подряд: {self.consecutive_errors})")
+                    return ""
+        
+        self._record_error(str(last_exception))
+        return ""
 
     def _build_text_prompt(self, text: str, context: str, existing_categories: str = "") -> str:
         cats = existing_categories + "\n" if existing_categories else ""
