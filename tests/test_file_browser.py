@@ -96,14 +96,21 @@ class TestFileBrowserViewModel:
         assert vm.entries[0].name != ".." or len(vm.entries) == 0
     
     def test_navigate_down(self, view_model):
-        """Тест навигации вниз."""
+        """Тест навигации вниз - должен возвращать True только в крайней нижней позиции."""
         view_model.load_directory()
-        initial_index = view_model.selected_index
         
+        # Когда не в конце списка - navigate_down должен вернуть False
         result = view_model.navigate_down()
+        assert result is False
+        assert view_model.selected_index == 0  # индекс не изменился
         
+        # Перемещаемся в конец списка
+        view_model.selected_index = len(view_model.entries) - 1
+        
+        # Теперь navigate_down должен вернуть True (сигнал для прокрутки)
+        result = view_model.navigate_down()
         assert result is True
-        assert view_model.selected_index == initial_index + 1
+        assert view_model.selected_index == len(view_model.entries) - 1  # индекс не изменился
     
     def test_navigate_down_at_end(self, view_model):
         """Тест навигации вниз в конце списка."""
@@ -113,18 +120,26 @@ class TestFileBrowserViewModel:
         
         result = view_model.navigate_down()
         
-        assert result is False
-        assert view_model.selected_index == len(view_model.entries) - 1
+        assert result is True  # В конце списка navigate_down возвращает True для прокрутки
+        assert view_model.selected_index == len(view_model.entries) - 1  # индекс не изменился
     
     def test_navigate_up(self, view_model):
-        """Тест навигации вверх."""
+        """Тест навигации вверх - должен возвращать True только в крайней верхней позиции."""
         view_model.load_directory()
+        
+        # Когда не в начале списка - navigate_up должен вернуть False
         view_model.selected_index = 2
-        
         result = view_model.navigate_up()
+        assert result is False
+        assert view_model.selected_index == 2  # индекс не изменился
         
+        # Перемещаемся в начало списка
+        view_model.selected_index = 0
+        
+        # Теперь navigate_up должен вернуть True (сигнал для прокрутки)
+        result = view_model.navigate_up()
         assert result is True
-        assert view_model.selected_index == 1
+        assert view_model.selected_index == 0  # индекс не изменился
     
     def test_navigate_up_at_start(self, view_model):
         """Тест навигации вверх в начале списка."""
@@ -133,8 +148,8 @@ class TestFileBrowserViewModel:
         
         result = view_model.navigate_up()
         
-        assert result is False
-        assert view_model.selected_index == 0
+        assert result is True  # В начале списка navigate_up возвращает True для прокрутки
+        assert view_model.selected_index == 0  # индекс не изменился
     
     def test_get_selected_entry(self, view_model):
         """Тест получения выбранного элемента."""
@@ -407,7 +422,7 @@ class TestViewModelNavigation:
         return str(tmp_path)
     
     def test_navigate_down_multiple_times(self, sample_dir):
-        """Тест многократной навигации вниз."""
+        """Тест многократной навигации вниз - проверяем что navigate_down возвращает True только в конце."""
         from file_browser import FileBrowserViewModel
         from provenance import ProvenanceStore
         
@@ -417,14 +432,22 @@ class TestViewModelNavigation:
         
         initial_count = len(vm.entries)
         
-        # Нажимаем вниз несколько раз
-        for i in range(5):
+        # Когда не в конце списка - navigate_down должен вернуть False
+        for i in range(initial_count - 1):
             result = vm.navigate_down()
-            assert result is True
-            assert vm.selected_index == i + 1
+            assert result is False
+            assert vm.selected_index == 0  # индекс не меняется
+        
+        # Перемещаемся вручную в конец
+        vm.selected_index = initial_count - 1
+        
+        # Теперь navigate_down должен вернуть True (сигнал для прокрутки)
+        result = vm.navigate_down()
+        assert result is True
+        assert vm.selected_index == initial_count - 1  # индекс не меняется
     
     def test_navigate_up_from_middle(self, sample_dir):
-        """Тест навигации вверх из середины списка."""
+        """Тест навигации вверх из середины списка - должен вернуть False пока не в начале."""
         from file_browser import FileBrowserViewModel
         from provenance import ProvenanceStore
         
@@ -435,9 +458,18 @@ class TestViewModelNavigation:
         # Перемещаемся в середину
         vm.selected_index = 5
         
-        # Вверх
-        vm.navigate_up()
-        assert vm.selected_index == 4
+        # Вверх - должен вернуть False так как не в начале
+        result = vm.navigate_up()
+        assert result is False
+        assert vm.selected_index == 5  # индекс не меняется
+        
+        # Перемещаемся в начало
+        vm.selected_index = 0
+        
+        # Теперь navigate_up должен вернуть True (сигнал для прокрутки)
+        result = vm.navigate_up()
+        assert result is True
+        assert vm.selected_index == 0  # индекс не меняется
     
     def test_boundary_conditions_navigation(self, sample_dir):
         """Тест граничных условий навигации."""
@@ -448,16 +480,16 @@ class TestViewModelNavigation:
         vm = FileBrowserViewModel(sample_dir, provenance)
         vm.load_directory()
         
-        # Находимся в начале - up должен вернуть False
-        assert vm.navigate_up() is False
-        assert vm.selected_index == 0
+        # Находимся в начале - up должен вернуть True (сигнал для прокрутки)
+        assert vm.navigate_up() is True
+        assert vm.selected_index == 0  # индекс не меняется
         
         # Перемещаемся в конец
         vm.selected_index = len(vm.entries) - 1
         
-        # down должен вернуть False
-        assert vm.navigate_down() is False
-        assert vm.selected_index == len(vm.entries) - 1
+        # down должен вернуть True (сигнал для прокрутки)
+        assert vm.navigate_down() is True
+        assert vm.selected_index == len(vm.entries) - 1  # индекс не меняется
 
 
 class TestFileBrowserNavigation:
@@ -471,40 +503,62 @@ class TestFileBrowserNavigation:
         return str(tmp_path)
     
     def test_sequential_down_navigation(self, sample_dir):
-        """Тест последовательной навигации вниз."""
+        """Тест последовательной навигации вниз - navigate_down возвращает True только в конце."""
         from file_browser import FileBrowserViewModel
         provenance = ProvenanceStore(sample_dir)
         vm = FileBrowserViewModel(sample_dir, provenance)
         vm.load_directory()
         
-        initial_index = vm.selected_index
+        initial_count = len(vm.entries)
         
-        # Нажимаем вниз несколько раз
-        for i in range(3):
+        # Когда не в конце - navigate_down должен вернуть False
+        for i in range(initial_count - 1):
             result = vm.navigate_down()
-            assert result is True
-            assert vm.selected_index == initial_index + i + 1
+            assert result is False
+            assert vm.selected_index == 0  # индекс не меняется
+        
+        # Перемещаемся вручную в конец
+        vm.selected_index = initial_count - 1
+        
+        # Теперь navigate_down должен вернуть True (сигнал для прокрутки)
+        result = vm.navigate_down()
+        assert result is True
+        assert vm.selected_index == initial_count - 1  # индекс не меняется
     
     def test_down_then_up_navigation(self, sample_dir):
-        """Тест навигации вниз затем вверх."""
+        """Тест навигации вниз затем вверх - проверяем что индексы не меняются пока не в крайних позициях."""
         from file_browser import FileBrowserViewModel
         provenance = ProvenanceStore(sample_dir)
         vm = FileBrowserViewModel(sample_dir, provenance)
         vm.load_directory()
         
-        # Вниз
-        vm.navigate_down()
-        assert vm.selected_index == 1
+        # Вниз из позиции 0 - должен вернуть False, индекс не меняется
+        result = vm.navigate_down()
+        assert result is False
+        assert vm.selected_index == 0
         
-        # Вверх
-        vm.navigate_up()
+        # Перемещаемся в середину вручную
+        vm.selected_index = 2
+        
+        # Вверх из середины - должен вернуть False, индекс не меняется
+        result = vm.navigate_up()
+        assert result is False
+        assert vm.selected_index == 2
+        
+        # Перемещаемся в начало
+        vm.selected_index = 0
+        
+        # Вверх из начала - должен вернуть True (сигнал для прокрутки)
+        result = vm.navigate_up()
+        assert result is True
         assert vm.selected_index == 0
     
     def test_first_down_goes_to_second_item(self, sample_dir):
-        """Тест что первое нажатие вниз переходит ко второму элементу.
-        
-        Это регрессионный тест для бага когда при первом нажатии вниз
-        фокус перескакивал на последний элемент.
+        """Тест что первое нажатие вниз не перемещает фокус.
+
+        Это регрессионный тест для проверки новой логики: при нажатии вниз
+        из любой позиции кроме последней, navigate_down возвращает False и
+        индекс не меняется. Прокрутка происходит только в крайней позиции.
         """
         from file_browser import FileBrowserViewModel
         provenance = ProvenanceStore(sample_dir)
@@ -514,12 +568,20 @@ class TestFileBrowserNavigation:
         initial_count = len(vm.entries)
         assert initial_count >= 2  # Убеждаемся что есть хотя бы 2 элемента
         
-        # Первое нажатие вниз
+        # Первое нажатие вниз из позиции 0
         result = vm.navigate_down()
         
+        # Должен вернуть False так как не в крайней нижней позиции
+        assert result is False
+        assert vm.selected_index == 0  # индекс не меняется
+        
+        # Перемещаемся в конец вручную
+        vm.selected_index = initial_count - 1
+        
+        # Теперь navigate_down должен вернуть True (сигнал для прокрутки)
+        result = vm.navigate_down()
         assert result is True
-        assert vm.selected_index == 1  # Должен быть второй элемент (индекс 1)
-        assert vm.selected_index != initial_count - 1  # Не должен быть последним
+        assert vm.selected_index == initial_count - 1  # индекс не меняется
 
 
 class TestProvenanceWithReasoning:
