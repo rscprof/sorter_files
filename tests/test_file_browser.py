@@ -4,6 +4,7 @@ import os
 import tempfile
 import json
 from pathlib import Path
+from unittest.mock import Mock, MagicMock
 
 import pytest
 
@@ -53,70 +54,282 @@ class TestFileEntry:
         assert "dir=False" in repr(entry)
 
 
-class TestFileBrowserHelpers:
-    """Тесты вспомогательных методов FileBrowser."""
+class TestFileBrowserViewModel:
+    """Тесты ViewModel файлового браузера."""
     
-    def test_wrap_text_short(self):
-        from file_browser import FileBrowser
-        
-        # Создаём фиктивный объект для вызова метода
-        class FakeBrowser:
-            def _wrap_text(self, text, width=40):
-                words = text.split()
-                lines = []
-                current_line = []
-                current_length = 0
-                
-                for word in words:
-                    if current_length + len(word) + 1 <= width:
-                        current_line.append(word)
-                        current_length += len(word) + 1
-                    else:
-                        if current_line:
-                            lines.append(' '.join(current_line))
-                        current_line = [word]
-                        current_length = len(word)
-                
-                if current_line:
-                    lines.append(' '.join(current_line))
-                
-                return lines
-        
-        browser = FakeBrowser()
-        result = browser._wrap_text("Короткий текст", width=40)
-        assert result == ["Короткий текст"]
+    @pytest.fixture
+    def sample_dir(self, tmp_path):
+        """Создать тестовую директорию с файлами."""
+        # Создаём структуру директорий
+        (tmp_path / "subdir").mkdir()
+        (tmp_path / "file1.txt").write_text("content1")
+        (tmp_path / "file2.txt").write_text("content2")
+        (tmp_path / "subdir" / "file3.txt").write_text("content3")
+        return str(tmp_path)
     
-    def test_wrap_text_long(self):
-        from file_browser import FileBrowser
+    @pytest.fixture
+    def view_model(self, sample_dir):
+        """Создать ViewModel для тестирования."""
+        from file_browser import FileBrowserViewModel
+        provenance = ProvenanceStore(sample_dir)
+        return FileBrowserViewModel(sample_dir, provenance)
+    
+    def test_load_directory(self, view_model, sample_dir):
+        """Тест загрузки директории."""
+        view_model.load_directory()
         
-        class FakeBrowser:
-            def _wrap_text(self, text, width=40):
-                words = text.split()
-                lines = []
-                current_line = []
-                current_length = 0
-                
-                for word in words:
-                    if current_length + len(word) + 1 <= width:
-                        current_line.append(word)
-                        current_length += len(word) + 1
-                    else:
-                        if current_line:
-                            lines.append(' '.join(current_line))
-                        current_line = [word]
-                        current_length = len(word)
-                
-                if current_line:
-                    lines.append(' '.join(current_line))
-                
-                return lines
+        # subdir, file1.txt, file2.txt (без .. т.к. это корень для VM)
+        assert len(view_model.entries) == 3
+        assert view_model.entries[0].name == "subdir"
+        assert view_model.entries[0].is_dir is True
+        assert view_model.selected_index == 0
+    
+    def test_load_directory_root_no_parent(self, sample_dir):
+        """Тест загрузки корневой директории (без ..)."""
+        from file_browser import FileBrowserViewModel
+        provenance = ProvenanceStore(sample_dir)
+        vm = FileBrowserViewModel(sample_dir, provenance)
         
-        browser = FakeBrowser()
-        long_text = "Это очень длинный текст который должен быть разбит на несколько строк"
-        result = browser._wrap_text(long_text, width=20)
-        assert len(result) > 1
-        for line in result:
-            assert len(line) <= 20 or len(line) == len(long_text)  # Или первая строка
+        vm.load_directory()
+        
+        # В корневой директории не должно быть ".."
+        assert vm.entries[0].name != ".." or len(vm.entries) == 0
+    
+    def test_navigate_down(self, view_model):
+        """Тест навигации вниз."""
+        view_model.load_directory()
+        initial_index = view_model.selected_index
+        
+        result = view_model.navigate_down()
+        
+        assert result is True
+        assert view_model.selected_index == initial_index + 1
+    
+    def test_navigate_down_at_end(self, view_model):
+        """Тест навигации вниз в конце списка."""
+        view_model.load_directory()
+        # Перемещаемся в конец
+        view_model.selected_index = len(view_model.entries) - 1
+        
+        result = view_model.navigate_down()
+        
+        assert result is False
+        assert view_model.selected_index == len(view_model.entries) - 1
+    
+    def test_navigate_up(self, view_model):
+        """Тест навигации вверх."""
+        view_model.load_directory()
+        view_model.selected_index = 2
+        
+        result = view_model.navigate_up()
+        
+        assert result is True
+        assert view_model.selected_index == 1
+    
+    def test_navigate_up_at_start(self, view_model):
+        """Тест навигации вверх в начале списка."""
+        view_model.load_directory()
+        view_model.selected_index = 0
+        
+        result = view_model.navigate_up()
+        
+        assert result is False
+        assert view_model.selected_index == 0
+    
+    def test_get_selected_entry(self, view_model):
+        """Тест получения выбранного элемента."""
+        view_model.load_directory()
+        
+        entry = view_model.get_selected_entry()
+        
+        assert entry is not None
+        assert entry == view_model.entries[0]
+    
+    def test_get_selected_entry_out_of_bounds(self, view_model):
+        """Тест получения элемента за пределами диапазона."""
+        view_model.load_directory()
+        view_model.selected_index = 999
+        
+        entry = view_model.get_selected_entry()
+        
+        assert entry is None
+    
+    def test_open_selected_directory(self, view_model, sample_dir):
+        """Тест открытия директории."""
+        view_model.load_directory()
+        # Находим subdir
+        for i, entry in enumerate(view_model.entries):
+            if entry.name == "subdir":
+                view_model.selected_index = i
+                break
+        
+        new_path = view_model.open_selected()
+        
+        assert new_path is not None
+        assert "subdir" in new_path
+        assert view_model.current_path == new_path
+        assert view_model.selected_index == 0
+    
+    def test_go_back(self, view_model, sample_dir):
+        """Тест возврата назад."""
+        view_model.load_directory()
+        # Открываем поддиректорию
+        for i, entry in enumerate(view_model.entries):
+            if entry.name == "subdir":
+                view_model.selected_index = i
+                break
+        view_model.open_selected()
+        
+        # Возвращаемся назад
+        new_path = view_model.go_back()
+        
+        assert new_path == sample_dir
+        assert view_model.current_path == sample_dir
+        assert view_model.selected_index == 0
+    
+    def test_get_entries_for_display(self, view_model):
+        """Тест получения данных для отображения."""
+        view_model.load_directory()
+        
+        entries = view_model.get_entries_for_display()
+        
+        assert len(entries) == len(view_model.entries)
+        # Проверяем формат кортежей
+        for display_name, base_style, focus_style in entries:
+            assert isinstance(display_name, str)
+            assert isinstance(base_style, str)
+            assert isinstance(focus_style, str)
+    
+    def test_get_reasoning_data_no_selection(self, view_model):
+        """Тест получения данных обоснования без выбора."""
+        view_model.entries = []
+        
+        data = view_model.get_reasoning_data()
+        
+        assert data.get("empty") is True
+    
+    def test_refresh(self, view_model):
+        """Тест обновления директории."""
+        view_model.load_directory()
+        view_model.selected_index = 2
+        
+        view_model.refresh()
+        
+        assert view_model.selected_index == 0  # После refresh индекс сбрасывается
+
+
+class TestFileBrowserView:
+    """Тесты View файлового браузера."""
+    
+    @pytest.fixture
+    def mock_vm(self):
+        """Создать mock ViewModel."""
+        vm = Mock()
+        vm.entries = [
+            Mock(name="..", is_dir=True),
+            Mock(name="file1.txt", is_dir=False),
+            Mock(name="file2.txt", is_dir=False),
+        ]
+        vm.get_entries_for_display.return_value = [
+            ("📁 ..", 'directory', 'directory_focus'),
+            ("📄 file1.txt", 'file', 'file_focus'),
+            ("📄 file2.txt", 'file', 'file_focus'),
+        ]
+        vm.get_reasoning_data.return_value = {"empty": True}
+        return vm
+    
+    def test_render_file_list(self, mock_vm):
+        """Тест отрисовки списка файлов."""
+        from file_browser import FileBrowserView
+        
+        view = FileBrowserView(mock_vm)
+        view.render_file_list()
+        
+        # Проверяем что walker не пустой
+        assert len(view.file_walker) == 3
+    
+    def test_render_file_list_sets_focus(self, mock_vm):
+        """Тест установки фокуса при отрисовке."""
+        from file_browser import FileBrowserView
+        
+        mock_vm.selected_index = 1
+        view = FileBrowserView(mock_vm)
+        view.render_file_list()
+        
+        # Проверяем что фокус установлен корректно
+        assert view.file_walker.focus == 1
+    
+    def test_update_footer(self, mock_vm):
+        """Тест обновления footer."""
+        from file_browser import FileBrowserView
+        
+        view = FileBrowserView(mock_vm)
+        view.update_footer()
+        
+        assert "Навигация" in view.footer_text.text
+        assert "Выход" in view.footer_text.text
+
+
+class TestFileBrowserNavigation:
+    """Интеграционные тесты навигации."""
+    
+    @pytest.fixture
+    def sample_dir(self, tmp_path):
+        """Создать тестовую директорию с несколькими файлами."""
+        for i in range(5):
+            (tmp_path / f"file{i}.txt").write_text(f"content{i}")
+        return str(tmp_path)
+    
+    def test_sequential_down_navigation(self, sample_dir):
+        """Тест последовательной навигации вниз."""
+        from file_browser import FileBrowserViewModel
+        provenance = ProvenanceStore(sample_dir)
+        vm = FileBrowserViewModel(sample_dir, provenance)
+        vm.load_directory()
+        
+        initial_index = vm.selected_index
+        
+        # Нажимаем вниз несколько раз
+        for i in range(3):
+            result = vm.navigate_down()
+            assert result is True
+            assert vm.selected_index == initial_index + i + 1
+    
+    def test_down_then_up_navigation(self, sample_dir):
+        """Тест навигации вниз затем вверх."""
+        from file_browser import FileBrowserViewModel
+        provenance = ProvenanceStore(sample_dir)
+        vm = FileBrowserViewModel(sample_dir, provenance)
+        vm.load_directory()
+        
+        # Вниз
+        vm.navigate_down()
+        assert vm.selected_index == 1
+        
+        # Вверх
+        vm.navigate_up()
+        assert vm.selected_index == 0
+    
+    def test_first_down_goes_to_second_item(self, sample_dir):
+        """Тест что первое нажатие вниз переходит ко второму элементу.
+        
+        Это регрессионный тест для бага когда при первом нажатии вниз
+        фокус перескакивал на последний элемент.
+        """
+        from file_browser import FileBrowserViewModel
+        provenance = ProvenanceStore(sample_dir)
+        vm = FileBrowserViewModel(sample_dir, provenance)
+        vm.load_directory()
+        
+        initial_count = len(vm.entries)
+        assert initial_count >= 2  # Убеждаемся что есть хотя бы 2 элемента
+        
+        # Первое нажатие вниз
+        result = vm.navigate_down()
+        
+        assert result is True
+        assert vm.selected_index == 1  # Должен быть второй элемент (индекс 1)
+        assert vm.selected_index != initial_count - 1  # Не должен быть последним
 
 
 class TestProvenanceWithReasoning:
