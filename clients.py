@@ -459,11 +459,23 @@ class SearXNGClient:
 
     def is_known_distributable(self, filename: str) -> bool:
         """Проверить, является ли файл общедоступным дистрибутивом."""
-        queries = [f'"{filename}" download free', f'"{filename}" скачать']
+        # Deb-файлы часто публично доступны — проверяем особенно тщательно
+        if filename.endswith(".deb"):
+            pkg_name = filename.rsplit("_", 1)[0].rsplit("-", 1)[0]
+            queries = [
+                f'"{filename}" download',
+                f'"{pkg_name}" .deb package',
+                f'apt {pkg_name} download',
+                f'"{filename}" debian repository',
+            ]
+        else:
+            queries = [f'"{filename}" download free', f'"{filename}" скачать']
+        
         for query in queries:
-            results = self.search(query, max_results=3)
+            results = self.search(query, max_results=5)
             for r in results:
                 title = (r.get("title", "") + " " + r.get("url", "")).lower()
-                if any(kw in title for kw in ["download", "скачать", "release", "installer", "setup", "official"]):
+                if any(kw in title for kw in ["download", "скачать", "release", "installer", "setup", "official", 
+                                               "repository", "package", "apt", "debian", "ubuntu"]):
                     return True
         return False
