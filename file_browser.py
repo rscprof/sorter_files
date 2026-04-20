@@ -274,6 +274,9 @@ class FileBrowserView:
             try:
                 focus_idx = max(0, min(self.vm.selected_index, len(self.vm.entries) - 1))
                 self.file_walker.set_focus(focus_idx)
+                # Важно: устанавливаем focus_position для ListBox чтобы предотвратить
+                # некорректное поведение прокрутки
+                self.file_listbox.focus_position = focus_idx
             except (TypeError, AttributeError):
                 # Для тестов с mock объектами
                 pass
