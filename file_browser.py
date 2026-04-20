@@ -52,6 +52,7 @@ class FileBrowserViewModel:
         self.history: List[str] = []
         self.entries: List[FileEntry] = []
         self.selected_index = 0
+        self.top_index = 0  # Индекс элемента, находящегося сверху в видимой области
     
     def load_directory(self, path: Optional[str] = None) -> None:
         """Загрузить содержимое директории."""
@@ -65,6 +66,7 @@ class FileBrowserViewModel:
         except PermissionError:
             self.entries.append(FileEntry("[Нет доступа]", False, ""))
             self.selected_index = 0
+            self.top_index = 0
             return
         
         # Добавляем ".." если не в корне
@@ -96,6 +98,85 @@ class FileBrowserViewModel:
                        sorted(files, key=lambda x: x.name.lower())
         
         self.selected_index = 0
+        self.top_index = 0
+    
+    def navigation_up(self, viewport_height: int = 20) -> bool:
+        """Обработать нажатие кнопки ВВЕРХ.
+        
+        Прокрутка списка выполняется только при нахождении в крайней верхней позиции:
+        - Если selected_index > 0: просто перемещаем selected_index вверх
+        - Если selected_index == 0 и top_index > 0: прокручиваем список вверх (уменьшаем top_index)
+        - Если selected_index == 0 и top_index == 0: крайняя позиция, прокрутка невозможна
+        
+        Args:
+            viewport_height: Количество видимых элементов в списке.
+        
+        Returns:
+            True если была выполнена прокрутка (изменение top_index), 
+            False если просто перемещение выделения или достигнут край.
+        """
+        if not self.entries:
+            return False
+        
+        # Если не в самом верху списка - просто перемещаем выделение
+        if self.selected_index > 0:
+            self.selected_index -= 1
+            # Если выделенный элемент ушёл за верхнюю границу видимости,
+            # прокручиваем список так чтобы он стал виден
+            if self.selected_index < self.top_index:
+                self.top_index = self.selected_index
+            return False
+        
+        # selected_index == 0 - мы в крайней верхней позиции выделения
+        # Проверяем можно ли прокрутить список ещё выше
+        if self.top_index > 0:
+            # Прокручиваем список вверх
+            self.top_index -= 1
+            return True
+        
+        # top_index == 0 - достигли самого верха, прокрутка невозможна
+        return False
+    
+    def navigation_down(self, viewport_height: int = 20) -> bool:
+        """Обработать нажатие кнопки ВНИЗ.
+        
+        Прокрутка списка выполняется только при нахождении в крайней нижней позиции:
+        - Если selected_index < len(entries) - 1: просто перемещаем selected_index вниз
+        - Если selected_index == len(entries) - 1 и top_index можно увеличить: прокручиваем список вниз
+        - Если selected_index == len(entries) - 1 и top_index максимален: крайняя позиция
+        
+        Args:
+            viewport_height: Количество видимых элементов в списке.
+        
+        Returns:
+            True если была выполнена прокрутка (изменение top_index),
+            False если просто перемещение выделения или достигнут край.
+        """
+        if not self.entries:
+            return False
+        
+        max_index = len(self.entries) - 1
+        
+        # Если не в самом низу списка - просто перемещаем выделение
+        if self.selected_index < max_index:
+            self.selected_index += 1
+            # Если выделенный элемент ушёл за нижнюю границу видимости,
+            # прокручиваем список так чтобы он стал виден
+            bottom_visible_index = self.top_index + viewport_height - 1
+            if self.selected_index > bottom_visible_index:
+                self.top_index = self.selected_index - viewport_height + 1
+            return False
+        
+        # selected_index == max_index - мы в крайней нижней позиции выделения
+        # Проверяем можно ли прокрутить список ещё ниже
+        max_top_index = max(0, len(self.entries) - viewport_height)
+        if self.top_index < max_top_index:
+            # Прокручиваем список вниз
+            self.top_index += 1
+            return True
+        
+        # top_index максимален - достигли самого низа, прокрутка невозможна
+        return False
     
     def navigate_up(self) -> bool:
         """Проверить, находится ли курсор в крайней верхней позиции.
@@ -337,6 +418,9 @@ class FileBrowserView:
                 # некорректное поведение прокрутки. При навигации вверх/вниз мы должны
                 # оставаться на текущей позиции пока не достигнем края списка.
                 self.file_listbox.focus_position = focus_idx
+                # Устанавливаем top_index для управления видимой областью списка
+                # Это обеспечивает прокрутку только при достижении крайних позиций
+                self.file_listbox.offset_rows = self.vm.top_index
             except (TypeError, AttributeError):
                 # Для тестов с mock объектами
                 pass
@@ -487,22 +571,18 @@ class FileBrowser:
     def handle_input(self, key) -> None:
         """Обработка ввода пользователя."""
         if key in ('up', 'k'):
-            # Прокрутка вверх: выполняем только если в крайней верхней позиции (selected_index == 0)
-            # Если selected_index == 0, это сигнал для прокрутки содержимого списка вверх
-            if self.vm.navigate_up():
-                # Находимся в крайней верхней позиции - выполняем прокрутку
-                # В текущей реализации просто игнорируем (можно добавить скролл панели обоснований)
-                pass
-            # Если не в крайней позиции (navigate_up вернул False), ничего не делаем
+            # Используем новый метод navigation_up для управления выделением и прокруткой
+            # Прокрутка выполняется только когда selected_index == 0 (крайняя верхняя позиция)
+            self.vm.navigation_up()
+            self.view.render_file_list()
+            self.view.render_reasoning_panel()
         
         elif key in ('down', 'j'):
-            # Прокрутка вниз: выполняем только если в крайней нижней позиции
-            # Если selected_index == len(entries) - 1, это сигнал для прокрутки содержимого списка вниз
-            if self.vm.navigate_down():
-                # Находимся в крайней нижней позиции - выполняем прокрутку
-                # В текущей реализации просто игнорируем (можно добавить скролл панели обоснований)
-                pass
-            # Если не в крайней позиции (navigate_down вернул False), ничего не делаем
+            # Используем новый метод navigation_down для управления выделением и прокруткой
+            # Прокрутка выполняется только когда selected_index == len(entries) - 1 (крайняя нижняя позиция)
+            self.vm.navigation_down()
+            self.view.render_file_list()
+            self.view.render_reasoning_panel()
         
         elif key in ('enter', 'right', 'l'):
             new_path = self.vm.open_selected()

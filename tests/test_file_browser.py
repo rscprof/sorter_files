@@ -490,6 +490,85 @@ class TestViewModelNavigation:
         # down должен вернуть True (сигнал для прокрутки)
         assert vm.navigate_down() is True
         assert vm.selected_index == len(vm.entries) - 1  # индекс не меняется
+    
+    def test_navigation_up_changes_indices(self, sample_dir):
+        """Тест что navigation_up изменяет selected_index и top_index корректно."""
+        from file_browser import FileBrowserViewModel
+        from provenance import ProvenanceStore
+        
+        provenance = ProvenanceStore(sample_dir)
+        vm = FileBrowserViewModel(sample_dir, provenance)
+        vm.load_directory()
+        
+        # Изначально оба индекса равны 0
+        assert vm.selected_index == 0
+        assert vm.top_index == 0
+        
+        # Перемещаемся в середину
+        vm.selected_index = 5
+        vm.top_index = 3
+        
+        # navigation_up должен уменьшить selected_index
+        result = vm.navigation_up()
+        assert result is False  # Прокрутки не было
+        assert vm.selected_index == 4
+        assert vm.top_index == 3  # top_index не изменился
+        
+        # Перемещаемся на позицию где selected_index == top_index
+        vm.selected_index = 3
+        
+        # navigation_up должен уменьшить selected_index и top_index
+        result = vm.navigation_up()
+        assert result is False  # Прокрутки не было (просто перемещение выделения)
+        assert vm.selected_index == 2
+        assert vm.top_index == 2  # top_index подстроился под selected_index
+        
+        # Теперь selected_index == 0, top_index > 0 - должна быть прокрутка
+        vm.selected_index = 0
+        vm.top_index = 5
+        
+        result = vm.navigation_up()
+        assert result is True  # Была прокрутка
+        assert vm.selected_index == 0  # selected_index не изменился
+        assert vm.top_index == 4  # top_index уменьшился
+    
+    def test_navigation_down_changes_indices(self, sample_dir):
+        """Тест что navigation_down изменяет selected_index и top_index корректно."""
+        from file_browser import FileBrowserViewModel
+        from provenance import ProvenanceStore
+        
+        provenance = ProvenanceStore(sample_dir)
+        vm = FileBrowserViewModel(sample_dir, provenance)
+        vm.load_directory()
+        
+        viewport_height = 5  # Маленький viewport чтобы можно было прокручивать
+        max_index = len(vm.entries) - 1
+        
+        # Изначально оба индекса равны 0
+        assert vm.selected_index == 0
+        assert vm.top_index == 0
+        
+        # Перемещаемся в середину
+        vm.selected_index = 5
+        vm.top_index = 3
+        
+        # navigation_down должен увеличить selected_index
+        result = vm.navigation_down(viewport_height)
+        assert result is False  # Прокрутки не было
+        assert vm.selected_index == 6
+        assert vm.top_index == 3  # top_index не изменился
+        
+        # Устанавливаем ситуацию где selected_index == max_index, но top_index можно увеличить
+        # Для этого нужно чтобы len(entries) > viewport_height
+        vm.selected_index = max_index
+        vm.top_index = 0
+        
+        # При viewport_height=5 и len(entries)=10, max_top_index = 10-5 = 5
+        # top_index=0 < 5, поэтому должна быть прокрутка
+        result = vm.navigation_down(viewport_height)
+        assert result is True  # Была прокрутка
+        assert vm.selected_index == max_index  # selected_index не изменился
+        assert vm.top_index == 1  # top_index увеличился
 
 
 class TestFileBrowserNavigation:
@@ -580,6 +659,81 @@ class TestFileBrowserNavigation:
         result = vm.navigate_down()
         assert result is True
         assert vm.selected_index == initial_count - 1  # индекс не меняется
+    
+    def test_navigation_up_integration(self, sample_dir):
+        """Интеграционный тест navigation_up - проверка изменения selected_index и top_index."""
+        from file_browser import FileBrowserViewModel
+        provenance = ProvenanceStore(sample_dir)
+        vm = FileBrowserViewModel(sample_dir, provenance)
+        vm.load_directory()
+        
+        # Начинаем с позиции 3
+        vm.selected_index = 3
+        vm.top_index = 2
+        
+        # navigation_up должен уменьшить selected_index
+        result = vm.navigation_up()
+        assert result is False
+        assert vm.selected_index == 2
+        assert vm.top_index == 2  # top_index подстроился
+        
+        # Ещё раз navigation_up
+        result = vm.navigation_up()
+        assert result is False
+        assert vm.selected_index == 1
+        assert vm.top_index == 1
+        
+        # Ещё раз - теперь selected_index == 0
+        result = vm.navigation_up()
+        assert result is False
+        assert vm.selected_index == 0
+        assert vm.top_index == 0
+        
+        # Теперь selected_index == 0 и top_index == 0 - достигнут край
+        result = vm.navigation_up()
+        assert result is False  # Прокрутка невозможна,已达 край
+    
+    def test_navigation_down_integration(self, sample_dir):
+        """Интеграционный тест navigation_down - проверка изменения selected_index и top_index."""
+        from file_browser import FileBrowserViewModel
+        provenance = ProvenanceStore(sample_dir)
+        vm = FileBrowserViewModel(sample_dir, provenance)
+        vm.load_directory()
+        
+        viewport_height = 3  # Маленький viewport для теста
+        
+        # Начинаем с позиции 0
+        vm.selected_index = 0
+        vm.top_index = 0
+        
+        # navigation_down должен увеличить selected_index
+        result = vm.navigation_down(viewport_height)
+        assert result is False
+        assert vm.selected_index == 1
+        assert vm.top_index == 0
+        
+        # Ещё раз navigation_down
+        result = vm.navigation_down(viewport_height)
+        assert result is False
+        assert vm.selected_index == 2
+        assert vm.top_index == 0
+        
+        # Ещё раз - теперь selected_index переходит на 3, а top_index увеличивается до 1
+        # так как selected_index (3) выходит за пределы видимости (top_index + viewport_height - 1 = 0 + 3 - 1 = 2)
+        result = vm.navigation_down(viewport_height)
+        assert result is False  # Не прокрутка в смысле достижения края, а просто перемещение с подстройкой top_index
+        assert vm.selected_index == 3
+        assert vm.top_index == 1  # top_index увеличился чтобы показать selected_index
+        
+        # Теперь selected_index == max_index (4 при 5 элементах), top_index можно ещё увеличить
+        result = vm.navigation_down(viewport_height)
+        assert result is False  # Просто перемещение с подстройкой top_index
+        assert vm.selected_index == len(vm.entries) - 1  # selected_index теперь max
+        assert vm.top_index == 2  # top_index увеличился
+        
+        # Теперь selected_index == max_index и top_index максимален - достигнут край
+        result = vm.navigation_down(viewport_height)
+        assert result is False  # Прокрутка невозможна,已达 край
 
 
 class TestProvenanceWithReasoning:
