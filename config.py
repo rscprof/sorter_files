@@ -54,6 +54,7 @@ DEFAULTS: dict[str, Any] = {
         "package.json", "requirements.txt", "setup.py", "pyproject.toml",
         "CMakeLists.txt", "Makefile", "Cargo.toml", "go.mod",
         "build.gradle", "pom.xml", ".git", ".gitignore", "Dockerfile",
+        "src/", "include/", "lib/", "main.cpp", "main.c", "main.py",
     ],
 
     "project_exclude_dirs": [
@@ -65,7 +66,7 @@ DEFAULTS: dict[str, Any] = {
         "py": ["__pycache__", "*.pyc", "*.pyo", ".pytest_cache", ".mypy_cache", "*.egg-info", "dist/", "build/", "*.egg"],
         "js": ["node_modules/", "dist/", "build/", ".next/", "out/", ".turbo/", "*.min.js", "*.min.js.map"],
         "java": ["target/", "build/", "out/", "*.class", "*.jar", "*.war", "*.ear", ".gradle/"],
-        "c": ["build/", "cmake-build-debug/", "CMakeFiles/", "*.o", "*.so", "*.a", "*.exe"],
+        "c": ["build/", "cmake-build-debug/", "CMakeFiles/", "*.o", "*.so", "*.a", "*.exe", "*.deb"],
         "cs": ["bin/", "obj/", "*.dll", "*.exe", "*.pdb", ".vs/"],
         "go": ["vendor/", "*.exe", "dist/"],
         "rs": ["target/", "Cargo.lock"],
