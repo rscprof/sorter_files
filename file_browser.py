@@ -100,7 +100,7 @@ class FileBrowserViewModel:
         self.selected_index = 0
         self.top_index = 0
     
-    def navigation_up(self, viewport_height: int = 20) -> bool:
+    def navigation_up(self, viewport_height: int) -> bool:
         """Обработать нажатие кнопки ВВЕРХ.
         
         Прокрутка списка выполняется только при нахождении в крайней верхней позиции:
@@ -137,7 +137,7 @@ class FileBrowserViewModel:
         # top_index == 0 - достигли самого верха, прокрутка невозможна
         return False
     
-    def navigation_down(self, viewport_height: int = 20) -> bool:
+    def navigation_down(self, viewport_height: int) -> bool:
         """Обработать нажатие кнопки ВНИЗ.
         
         Прокрутка списка выполняется только при нахождении в крайней нижней позиции:
@@ -582,16 +582,20 @@ class FileBrowser:
     def handle_input(self, key) -> None:
         """Обработка ввода пользователя."""
         if key in ('up', 'k'):
+            # Получаем viewport_height из размера ListBox
+            viewport_height = self._get_viewport_height()
             # Используем новый метод navigation_up для управления выделением и прокруткой
             # Прокрутка выполняется только когда selected_index == 0 (крайняя верхняя позиция)
-            self.vm.navigation_up()
+            self.vm.navigation_up(viewport_height)
             self.view.render_file_list()
             self.view.render_reasoning_panel()
         
         elif key in ('down', 'j'):
+            # Получаем viewport_height из размера ListBox
+            viewport_height = self._get_viewport_height()
             # Используем новый метод navigation_down для управления выделением и прокруткой
             # Прокрутка выполняется только когда selected_index == len(entries) - 1 (крайняя нижняя позиция)
-            self.vm.navigation_down()
+            self.vm.navigation_down(viewport_height)
             self.view.render_file_list()
             self.view.render_reasoning_panel()
         
