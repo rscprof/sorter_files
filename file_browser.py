@@ -351,6 +351,9 @@ class FileBrowserView:
         self.file_walker = urwid.SimpleFocusListWalker([])
         # Отключаем обработку клавиш в ListBox - будем обрабатывать сами
         self.file_listbox = NavigableListBox(self.file_walker, self._handle_keypress)
+        # Устанавливаем выравнивание фокуса вверх - это предотвращает некорректное
+        # поведение прокрутки когда urwid пытается центрировать фокус
+        self.file_listbox.set_focus_valign('top')
         
         self.reasoning_walker = urwid.SimpleFocusListWalker([])
         self.reasoning_view = urwid.ListBox(self.reasoning_walker)
