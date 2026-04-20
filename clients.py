@@ -458,7 +458,13 @@ class SearXNGClient:
             return []
 
     def is_known_distributable(self, filename: str) -> bool:
-        """Проверить, является ли файл общедоступным дистрибутивом."""
+        """Проверить, является ли файл общедоступным дистрибутивом.
+        
+        Поддерживает проверку для:
+        - .deb пакетов
+        - Архивов с исходниками (.tar.gz, .tar.bz2, .tgz и т.п.)
+        - Других исполняемых дистрибутивов
+        """
         # Deb-файлы часто публично доступны — проверяем особенно тщательно
         if filename.endswith(".deb"):
             pkg_name = filename.rsplit("_", 1)[0].rsplit("-", 1)[0]
@@ -468,14 +474,26 @@ class SearXNGClient:
                 f'apt {pkg_name} download',
                 f'"{filename}" debian repository',
             ]
+        # Архивы с исходниками (tarball) — типичный формат распространения ПО
+        elif any(filename.endswith(ext) for ext in [".tar.gz", ".tar.bz2", ".tar.xz", ".tgz", ".tbz2", ".txz"]):
+            # Извлекаем имя проекта из имени файла (например, project-1.0.tar.gz -> project)
+            base_name = filename.split(".tar.")[0] if ".tar." in filename else filename.split(".t")[0]
+            # Удаляем версию из имени (project-1.0 -> project)
+            proj_name = base_name.rsplit("-", 1)[0] if "-" in base_name else base_name
+            queries = [
+                f'"{filename}" source tarball',
+                f'"{base_name}" source code',
+                f'"{proj_name}" github release',
+                f'"{filename}" download',
+            ]
         else:
             queries = [f'"{filename}" download free', f'"{filename}" скачать']
-        
+
         for query in queries:
             results = self.search(query, max_results=5)
             for r in results:
                 title = (r.get("title", "") + " " + r.get("url", "")).lower()
-                if any(kw in title for kw in ["download", "скачать", "release", "installer", "setup", "official", 
-                                               "repository", "package", "apt", "debian", "ubuntu"]):
+                if any(kw in title for kw in ["download", "скачать", "release", "installer", "setup", "official",
+                                               "repository", "package", "apt", "debian", "ubuntu", "github", "source", "tarball"]):
                     return True
         return False

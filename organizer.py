@@ -281,11 +281,21 @@ class FileOrganizer:
         """Распаковать архив и обработить каждый файл по полной цепочке.
         
         depth — уровень вложенности (1 = первый архив, 2 = вложенный и т.д.)
+        
+        Если архив является публичным дистрибутивом (is_distributable=True),
+        он не распаковывается, а сразу перемещается в папку на удаление.
         """
+        indent = "  │   " * depth
+        
+        # Проверяем, не является ли архив публичным дистрибутивом
+        if archive_info.is_distributable or archive_info.should_delete:
+            logger.info(f"{indent}🗑  Публичный дистрибутив → без распаковки")
+            self._move_single_file(archive_info, dry_run=dry_run)
+            return
+        
         p = Path(archive_info.original_path)
         extract_dir = os.path.join(ARCHIVE_DIR, p.stem)
 
-        indent = "  │   " * depth
         logger.info(f"{indent}📦 Распаковка архива...")
         if dry_run:
             logger.info(f"{indent}[DRY] Распаковка -> {extract_dir}")
