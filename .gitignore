@@ -1,38 +1,4 @@
 ```
-# Python
 __pycache__/
 *.pyc
-*.pyo
-*.pyd
-
-# Testing
-.pytest_cache/
-.coverage
-coverage/
-htmlcov/
-
-# Dependencies
-.venv/
-venv/
-.env
-.env.local
-.env.*
-
-# Build artifacts
-dist/
-build/
-*.egg-info/
-
-# Editors
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# Logs
-*.log
-
-# OS
-.DS_Store
-Thumbs.db
 ```

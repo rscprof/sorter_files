@@ -197,6 +197,30 @@ class FileBrowserViewModel:
         return data
 
 
+class NavigableListBox(urwid.ListBox):
+    """ListBox с кастомной обработкой клавиш.
+    
+    Перехватывает все навигационные клавиши и передаёт их обработчику,
+    вместо того чтобы обрабатывать самостоятельно. Это предотвращает
+    некорректное поведение прокрутки и позволяет полностью контролировать
+    навигацию через ViewModel.
+    """
+    
+    def __init__(self, body, keypress_handler):
+        super().__init__(body)
+        self.keypress_handler = keypress_handler
+    
+    def keypress(self, size, key: str) -> Optional[str]:
+        """Перехватить нажатие клавиши и передать обработчику.
+        
+        Returns:
+            None если клавиша обработана, иначе ключ для дальнейшей обработки.
+        """
+        if self.keypress_handler(key):
+            return None  # Клавиша обработана
+        return super().keypress(size, key)
+
+
 class FileBrowserView:
     """View - визуальный слой файлового браузера."""
     
@@ -216,8 +240,14 @@ class FileBrowserView:
         ('help_text', 'light gray', 'default'),
     ]
     
-    def __init__(self, view_model: FileBrowserViewModel):
+    # Клавиши навигации которые нужно перехватывать
+    NAVIGATION_KEYS = ('up', 'down', 'page up', 'page down', 'home', 'end', 
+                       'k', 'j', 'g', 'G', 'left', 'right', 'h', 'l', 
+                       'enter', 'backspace', 'esc', 'r', 'R', 'q', 'Q')
+    
+    def __init__(self, view_model: FileBrowserViewModel, input_handler):
         self.vm = view_model
+        self.input_handler = input_handler
         
         # Виджеты
         self.header = urwid.AttrMap(
@@ -226,7 +256,8 @@ class FileBrowserView:
         )
         
         self.file_walker = urwid.SimpleFocusListWalker([])
-        self.file_listbox = urwid.ListBox(self.file_walker)
+        # Отключаем обработку клавиш в ListBox - будем обрабатывать сами
+        self.file_listbox = NavigableListBox(self.file_walker, self._handle_keypress)
         
         self.reasoning_walker = urwid.SimpleFocusListWalker([])
         self.reasoning_view = urwid.ListBox(self.reasoning_walker)
@@ -247,6 +278,22 @@ class FileBrowserView:
         )
         
         self.main_loop: Optional[urwid.MainLoop] = None
+    
+    def _handle_keypress(self, key: str) -> bool:
+        """Обработать нажатие клавиши.
+        
+        Returns:
+            True если клавиша была обработана, False если нет.
+        """
+        if key in self.NAVIGATION_KEYS or len(key) == 1:
+            try:
+                self.input_handler(key)
+                return True
+            except urwid.ExitMainLoop:
+                raise
+            except Exception:
+                return False
+        return False
     
     def create_main_loop(self, input_handler) -> urwid.MainLoop:
         """Создать главный цикл приложения."""
@@ -402,7 +449,8 @@ class FileBrowser:
     def __init__(self, target_dir: str):
         self.provenance = ProvenanceStore(os.path.abspath(target_dir))
         self.vm = FileBrowserViewModel(target_dir, self.provenance)
-        self.view = FileBrowserView(self.vm)
+        # Передаём обработчик ввода в View для перехвата клавиш
+        self.view = FileBrowserView(self.vm, self.handle_input)
         
         self.view.update_footer()
         self.vm.load_directory()
