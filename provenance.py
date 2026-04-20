@@ -33,6 +33,10 @@ class ProvenanceCard:
     subcategory: str = ""
     description: str = ""
     
+    # Обоснования
+    ai_reasoning: str = ""              # От нейронной сети
+    algorithmic_reasoning: str = ""     # От алгоритмического кода/правил
+    
     # Если файл извлечён из архива
     archive_source: str = ""            # Путь к архиву
     archive_extract_dir: str = ""       # Куда распакован
@@ -57,6 +61,8 @@ class ProvenanceCard:
             category=d.get("category", ""),
             subcategory=d.get("subcategory", ""),
             description=d.get("description", ""),
+            ai_reasoning=d.get("ai_reasoning", ""),
+            algorithmic_reasoning=d.get("algorithmic_reasoning", ""),
             archive_source=d.get("archive_source", ""),
             archive_extract_dir=d.get("archive_extract_dir", ""),
             move_history=d.get("move_history", []),
@@ -136,7 +142,8 @@ class ProvenanceStore:
     def upsert(self, file_hash: str, filename: str, original_path: str,
                current_path: str, category: str = "", subcategory: str = "",
                description: str = "", archive_source: str = "",
-               archive_extract_dir: str = "", reason: str = "initial") -> ProvenanceCard:
+               archive_extract_dir: str = "", reason: str = "initial",
+               ai_reasoning: str = "", algorithmic_reasoning: str = "") -> ProvenanceCard:
         """Создать или обновить карточку."""
         original_path = os.path.abspath(original_path)
         current_path = os.path.abspath(current_path)
@@ -160,6 +167,10 @@ class ProvenanceStore:
                 card.subcategory = subcategory
             if description:
                 card.description = description
+            if ai_reasoning:
+                card.ai_reasoning = ai_reasoning
+            if algorithmic_reasoning:
+                card.algorithmic_reasoning = algorithmic_reasoning
         else:
             # Новая карточка
             card = ProvenanceCard(
@@ -172,6 +183,8 @@ class ProvenanceStore:
                 category=category,
                 subcategory=subcategory,
                 description=description,
+                ai_reasoning=ai_reasoning,
+                algorithmic_reasoning=algorithmic_reasoning,
                 archive_source=archive_source,
                 archive_extract_dir=archive_extract_dir,
             )

@@ -770,6 +770,8 @@ class FileOrganizer:
                 archive_source=archive_source,
                 archive_extract_dir=archive_extract_dir,
                 reason="reprocess" if self.state.is_already_processed(info.file_hash) else "initial",
+                ai_reasoning=info.ai_reasoning,
+                algorithmic_reasoning=info.algorithmic_reasoning,
             )
 
             self.state.save()
