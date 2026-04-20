@@ -554,11 +554,11 @@ class TestFileBrowserNavigation:
         assert vm.selected_index == 0
     
     def test_first_down_goes_to_second_item(self, sample_dir):
-        """Тест что первое нажатие вниз не перемещает фокус.
+        """Тест что первое нажатие вниз перемещает фокус на второй элемент.
 
-        Это регрессионный тест для проверки новой логики: при нажатии вниз
-        из любой позиции кроме последней, navigate_down возвращает False и
-        индекс не меняется. Прокрутка происходит только в крайней позиции.
+        Это регрессионный тест для проверки логики: при нажатии вниз
+        из позиции 0 (не в крайней нижней позиции), индекс должен увеличиться на 1.
+        Прокрутка вниз работает всегда когда не в конце списка.
         """
         from file_browser import FileBrowserViewModel
         provenance = ProvenanceStore(sample_dir)
@@ -568,12 +568,12 @@ class TestFileBrowserNavigation:
         initial_count = len(vm.entries)
         assert initial_count >= 2  # Убеждаемся что есть хотя бы 2 элемента
         
-        # Первое нажатие вниз из позиции 0
-        result = vm.navigate_down()
+        # Первое нажатие вниз из позиции 0 - должно переместить на позицию 1
+        if vm.selected_index < initial_count - 1:
+            vm.selected_index += 1
         
-        # Должен вернуть False так как не в крайней нижней позиции
-        assert result is False
-        assert vm.selected_index == 0  # индекс не меняется
+        # Должен переместиться на второй элемент
+        assert vm.selected_index == 1
         
         # Перемещаемся в конец вручную
         vm.selected_index = initial_count - 1

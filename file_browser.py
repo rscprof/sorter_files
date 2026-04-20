@@ -98,22 +98,30 @@ class FileBrowserViewModel:
         self.selected_index = 0
     
     def navigate_up(self) -> bool:
-        """Переместиться вверх. Возвращает True если удалось.
+        """Проверить, находится ли курсор в крайней верхней позиции.
         
-        Прокрутка выполняется только при нахождении в крайней верхней позиции.
+        Возвращает True если selected_index == 0 (крайняя верхняя позиция),
+        что означает что при нажатии кнопки ВВЕРХ нужно выполнить прокрутку
+        (например, перейти в родительскую директорию или игнорировать).
+        
+        Returns:
+            True если в крайней верхней позиции, иначе False.
         """
-        if self.selected_index == 0:
-            return True
-        return False
+        return self.selected_index == 0
     
     def navigate_down(self) -> bool:
-        """Переместиться вниз. Возвращает True если удалось.
+        """Проверить, находится ли курсор в крайней нижней позиции.
         
-        Прокрутка выполняется только при нахождении в крайней нижней позиции.
+        Возвращает True если selected_index == len(entries) - 1 (крайняя нижняя позиция),
+        что означает что при нажатии кнопки ВНИЗ нужно выполнить прокрутку
+        (например, перейти к следующему элементу за пределами видимости или игнорировать).
+        
+        Returns:
+            True если в крайней нижней позиции, иначе False.
         """
-        if self.entries and self.selected_index == len(self.entries) - 1:
-            return True
-        return False
+        if not self.entries:
+            return False
+        return self.selected_index == len(self.entries) - 1
     
     def get_selected_entry(self) -> Optional[FileEntry]:
         """Получить выбранный элемент."""
@@ -479,20 +487,20 @@ class FileBrowser:
     def handle_input(self, key) -> None:
         """Обработка ввода пользователя."""
         if key in ('up', 'k'):
-            if self.vm.navigate_up():
-                # Находимся в крайней верхней позиции - выполняем прокрутку вверх
-                self.view.scroll_up()
-            else:
-                # Не в крайней позиции - просто перемещаем выделение вверх
-                self.view.scroll_up()
+            # Прокрутка вверх: уменьшаем индекс если не в начале
+            if self.vm.selected_index > 0:
+                self.vm.selected_index -= 1
+                self.view.render_file_list()
+                self.view.render_reasoning_panel()
+            # Если в начале (selected_index == 0), ничего не делаем
         
         elif key in ('down', 'j'):
-            if self.vm.navigate_down():
-                # Находимся в крайней нижней позиции - выполняем прокрутку вниз
-                self.view.scroll_down()
-            else:
-                # Не в крайней позиции - просто перемещаем выделение вниз
-                self.view.scroll_down()
+            # Прокрутка вниз: увеличиваем индекс если не в конце
+            if self.vm.entries and self.vm.selected_index < len(self.vm.entries) - 1:
+                self.vm.selected_index += 1
+                self.view.render_file_list()
+                self.view.render_reasoning_panel()
+            # Если в конце, ничего не делаем
         
         elif key in ('enter', 'right', 'l'):
             new_path = self.vm.open_selected()
