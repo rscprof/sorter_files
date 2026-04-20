@@ -11,7 +11,7 @@ import os
 import sys
 import json
 from pathlib import Path
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Tuple
 
 import urwid
 
@@ -37,8 +37,168 @@ class FileEntry:
         return f"FileEntry({self.name}, dir={self.is_dir})"
 
 
-class FileBrowser:
-    """Основное приложение файлового браузера."""
+class FileBrowserViewModel:
+    """ViewModel - модель представления для файлового браузера.
+    
+    Содержит состояние и бизнес-логику, отделённую от UI.
+    """
+    
+    def __init__(self, target_dir: str, provenance_store: ProvenanceStore):
+        self.target_dir = os.path.abspath(target_dir)
+        self.provenance = provenance_store
+        
+        # Состояние навигации
+        self.current_path = self.target_dir
+        self.history: List[str] = []
+        self.entries: List[FileEntry] = []
+        self.selected_index = 0
+    
+    def load_directory(self, path: Optional[str] = None) -> None:
+        """Загрузить содержимое директории."""
+        if path is not None:
+            self.current_path = path
+        
+        self.entries = []
+        
+        try:
+            items = sorted(os.listdir(self.current_path))
+        except PermissionError:
+            self.entries.append(FileEntry("[Нет доступа]", False, ""))
+            self.selected_index = 0
+            return
+        
+        # Добавляем ".." если не в корне
+        if self.current_path != self.target_dir:
+            parent = os.path.dirname(self.current_path)
+            self.entries.insert(0, FileEntry("..", True, parent))
+        
+        for name in items:
+            full_path = os.path.join(self.current_path, name)
+            is_dir = os.path.isdir(full_path)
+            
+            # Ищем карточку provenance
+            card = self.provenance.find_by_current_path(full_path)
+            
+            # Если это файл из "unknown" или корневой директории без карточки,
+            # пытаемся найти по original_path
+            if not card and not is_dir:
+                for c in self.provenance.cards.values():
+                    if os.path.abspath(c.current_path) == full_path:
+                        card = c
+                        break
+            
+            self.entries.append(FileEntry(name, is_dir, full_path, card))
+        
+        # Сортируем: сначала директории, потом файлы
+        dirs = [e for e in self.entries if e.is_dir]
+        files = [e for e in self.entries if not e.is_dir]
+        self.entries = sorted(dirs, key=lambda x: x.name.lower()) + \
+                       sorted(files, key=lambda x: x.name.lower())
+        
+        self.selected_index = 0
+    
+    def navigate_up(self) -> bool:
+        """Переместиться вверх. Возвращает True если удалось."""
+        if self.selected_index > 0:
+            self.selected_index -= 1
+            return True
+        return False
+    
+    def navigate_down(self) -> bool:
+        """Переместиться вниз. Возвращает True если удалось."""
+        if self.selected_index < len(self.entries) - 1:
+            self.selected_index += 1
+            return True
+        return False
+    
+    def get_selected_entry(self) -> Optional[FileEntry]:
+        """Получить выбранный элемент."""
+        if not self.entries or self.selected_index >= len(self.entries):
+            return None
+        return self.entries[self.selected_index]
+    
+    def open_selected(self) -> Optional[str]:
+        """Открыть выбранный элемент. Возвращает новый путь если это директория."""
+        entry = self.get_selected_entry()
+        if not entry:
+            return None
+        
+        if entry.name == "..":
+            return self._go_back()
+        
+        if entry.is_dir:
+            self.history.append(self.current_path)
+            self.current_path = entry.path
+            self.selected_index = 0
+            return self.current_path
+        
+        return None
+    
+    def go_back(self) -> Optional[str]:
+        """Вернуться назад. Возвращает новый путь."""
+        result = self._go_back()
+        if result:
+            self.selected_index = 0
+        return result
+    
+    def _go_back(self) -> Optional[str]:
+        """Внутренний метод возврата назад."""
+        if self.history:
+            self.current_path = self.history.pop()
+            return self.current_path
+        elif self.current_path != self.target_dir:
+            self.current_path = os.path.dirname(self.current_path)
+            return self.current_path
+        return None
+    
+    def refresh(self) -> None:
+        """Обновить текущую директорию."""
+        self.load_directory()
+    
+    def get_entries_for_display(self) -> List[Tuple[str, str, str]]:
+        """Получить данные для отображения списка файлов.
+        
+        Returns:
+            Список кортежей (display_name, base_style, focus_style)
+        """
+        result = []
+        for entry in self.entries:
+            if entry.name == "..":
+                result.append(("📁 ..", 'directory', 'directory_focus'))
+            elif entry.is_dir:
+                result.append((f"📁 {entry.name}/", 'directory', 'directory_focus'))
+            else:
+                result.append((f"📄 {entry.name}", 'file', 'file_focus'))
+        return result
+    
+    def get_reasoning_data(self) -> Dict[str, Any]:
+        """Получить данные для панели обоснований."""
+        entry = self.get_selected_entry()
+        if not entry:
+            return {"empty": True}
+        
+        data = {
+            "name": entry.name,
+            "path": entry.path,
+            "original_path": entry.original_path,
+            "is_dir": entry.is_dir,
+            "has_card": entry.card is not None,
+        }
+        
+        if entry.card:
+            card = entry.card
+            data["category"] = card.category
+            data["subcategory"] = card.subcategory
+            data["description"] = card.description
+            data["ai_reasoning"] = card.ai_reasoning
+            data["algorithmic_reasoning"] = card.algorithmic_reasoning
+            data["move_history"] = card.move_history[-5:] if card.move_history else []
+        
+        return data
+
+
+class FileBrowserView:
+    """View - визуальный слой файлового браузера."""
     
     PALETTE = [
         ('header', 'white', 'dark blue', 'bold'),
@@ -56,15 +216,8 @@ class FileBrowser:
         ('help_text', 'light gray', 'default'),
     ]
     
-    def __init__(self, target_dir: str):
-        self.target_dir = os.path.abspath(target_dir)
-        self.provenance = ProvenanceStore(self.target_dir)
-        
-        # Текущее состояние
-        self.current_path = self.target_dir
-        self.history: List[str] = []  # История навигации
-        self.entries: List[FileEntry] = []
-        self.selected_index = 0
+    def __init__(self, view_model: FileBrowserViewModel):
+        self.vm = view_model
         
         # Виджеты
         self.header = urwid.AttrMap(
@@ -72,8 +225,11 @@ class FileBrowser:
             'header'
         )
         
-        self.file_listbox = self._create_file_list()
-        self.reasoning_view = self._create_reasoning_view()
+        self.file_walker = urwid.SimpleFocusListWalker([])
+        self.file_listbox = urwid.ListBox(self.file_walker)
+        
+        self.reasoning_walker = urwid.SimpleFocusListWalker([])
+        self.reasoning_view = urwid.ListBox(self.reasoning_walker)
         
         # Основной layout
         main_columns = urwid.Columns([
@@ -81,176 +237,110 @@ class FileBrowser:
             ('weight', 1, self.reasoning_view),
         ])
         
-        self.footer = urwid.AttrMap(
-            urwid.Text(""),
-            'footer'
-        )
+        self.footer_text = urwid.Text("")
+        self.footer = urwid.AttrMap(self.footer_text, 'footer')
         
-        frame = urwid.Frame(
+        self.frame = urwid.Frame(
             body=main_columns,
             header=self.header,
             footer=self.footer
         )
         
+        self.main_loop: Optional[urwid.MainLoop] = None
+    
+    def create_main_loop(self, input_handler) -> urwid.MainLoop:
+        """Создать главный цикл приложения."""
         self.main_loop = urwid.MainLoop(
-            frame,
+            self.frame,
             palette=self.PALETTE,
-            unhandled_input=self.handle_input,
+            unhandled_input=input_handler,
         )
-        
-        self._load_directory()
-        self._update_footer()
+        return self.main_loop
     
-    def _create_file_list(self) -> urwid.ListBox:
-        """Создать список файлов."""
-        self.walker = urwid.SimpleFocusListWalker([])
-        return urwid.ListBox(self.walker)
+    def render_file_list(self) -> None:
+        """Отрисовать список файлов."""
+        self.file_walker.clear()
+        
+        for display_name, base_style, focus_style in self.vm.get_entries_for_display():
+            widget = urwid.AttrMap(
+                urwid.Text(display_name),
+                base_style,
+                focus_style
+            )
+            self.file_walker.append(widget)
+        
+        # Устанавливаем фокус корректно
+        if self.vm.entries:
+            try:
+                focus_idx = max(0, min(self.vm.selected_index, len(self.vm.entries) - 1))
+                self.file_walker.set_focus(focus_idx)
+            except (TypeError, AttributeError):
+                # Для тестов с mock объектами
+                pass
     
-    def _create_reasoning_view(self) -> urwid.ListBox:
-        """Создать панель обоснований."""
-        self.reasoning_walker = urwid.SimpleFocusListWalker([])
-        return urwid.ListBox(self.reasoning_walker)
-    
-    def _load_directory(self):
-        """Загрузить содержимое текущей директории."""
-        self.entries = []
-        
-        try:
-            items = sorted(os.listdir(self.current_path))
-        except PermissionError:
-            self.entries.append(FileEntry("[Нет доступа]", False, ""))
-            self._update_file_list()
-            return
-        
-        # Добавляем ".." если не в корне
-        if self.current_path != self.target_dir:
-            parent = os.path.dirname(self.current_path)
-            self.entries.insert(0, FileEntry("..", True, parent))
-        
-        for name in items:
-            full_path = os.path.join(self.current_path, name)
-            is_dir = os.path.isdir(full_path)
-            
-            # Ищем карточку provenance
-            card = self.provenance.find_by_current_path(full_path)
-            
-            # Если это файл из "unknown" или корневой директории без карточки,
-            # пытаемся найти по original_path
-            original_path = None
-            if not card and not is_dir:
-                # Ищем среди всех карточек те, у которых current_path совпадает
-                for c in self.provenance.cards.values():
-                    if os.path.abspath(c.current_path) == full_path:
-                        card = c
-                        break
-            
-            self.entries.append(FileEntry(name, is_dir, full_path, card))
-        
-        # Сортируем: сначала директории, потом файлы
-        dirs = [e for e in self.entries if e.is_dir]
-        files = [e for e in self.entries if not e.is_dir]
-        self.entries = sorted(dirs, key=lambda x: x.name.lower()) + \
-                       sorted(files, key=lambda x: x.name.lower())
-        
-        self.selected_index = 0
-        self._update_file_list()
-        self._update_reasoning()
-    
-    def _update_file_list(self):
-        """Обновить виджет списка файлов."""
-        self.walker.clear()
-        
-        for i, entry in enumerate(self.entries):
-            if entry.name == "..":
-                widget = urwid.AttrMap(
-                    urwid.Text("📁 .."),
-                    'directory',
-                    'directory_focus'
-                )
-            elif entry.is_dir:
-                widget = urwid.AttrMap(
-                    urwid.Text(f"📁 {entry.name}/"),
-                    'directory',
-                    'directory_focus'
-                )
-            else:
-                widget = urwid.AttrMap(
-                    urwid.Text(f"📄 {entry.name}"),
-                    'file',
-                    'file_focus'
-                )
-            
-            self.walker.append(widget)
-        
-        if self.entries:
-            self.walker.set_focus(max(0, min(self.selected_index, len(self.entries) - 1)))
-    
-    def _update_reasoning(self):
-        """Обновить панель обоснований для выбранного файла."""
+    def render_reasoning_panel(self) -> None:
+        """Отрисовать панель обоснований."""
         self.reasoning_walker.clear()
         
-        if not self.entries or self.selected_index >= len(self.entries):
-            return
+        data = self.vm.get_reasoning_data()
         
-        entry = self.entries[self.selected_index]
+        if data.get("empty"):
+            return
         
         widgets = []
         
         # Заголовок
         widgets.append(urwid.AttrMap(
-            urwid.Text(f"📋 Информация о файле", align='center'),
+            urwid.Text("📋 Информация о файле", align='center'),
             'header'
         ))
         widgets.append(urwid.Divider())
         
         # Имя и путь
-        widgets.append(urwid.Text(('file', f"Имя: {entry.name}")))
-        widgets.append(urwid.Text(('path_info', f"Путь: {entry.path}")))
+        widgets.append(urwid.Text(('file', f"Имя: {data['name']}")))
+        widgets.append(urwid.Text(('path_info', f"Путь: {data['path']}")))
         
-        if entry.original_path and entry.original_path != entry.path:
-            widgets.append(urwid.Text(('path_info', f"Оригинал: {entry.original_path}")))
+        if data.get('original_path') and data['original_path'] != data['path']:
+            widgets.append(urwid.Text(('path_info', f"Оригинал: {data['original_path']}")))
         
         widgets.append(urwid.Divider())
         
         # Provenance информация
-        if entry.card:
-            card = entry.card
-            
-            widgets.append(urwid.Text(('directory', "📊 Provenance:"),))
-            widgets.append(urwid.Text(f"  Категория: {card.category or '—'}"))
-            if card.subcategory:
-                widgets.append(urwid.Text(f"  Подкатегория: {card.subcategory}"))
-            if card.description:
-                widgets.append(urwid.Text(f"  Описание: {card.description}"))
+        if data.get('has_card'):
+            widgets.append(urwid.Text(('directory', "📊 Provenance:")))
+            widgets.append(urwid.Text(f"  Категория: {data.get('category') or '—'}"))
+            if data.get('subcategory'):
+                widgets.append(urwid.Text(f"  Подкатегория: {data['subcategory']}"))
+            if data.get('description'):
+                widgets.append(urwid.Text(f"  Описание: {data['description']}"))
             
             widgets.append(urwid.Divider())
             
             # Обоснование от AI
-            if card.ai_reasoning:
+            if data.get('ai_reasoning'):
                 widgets.append(urwid.Text(('reasoning_ai', "🤖 Обоснование AI:")))
-                # Разбиваем на строки для форматирования
-                for line in self._wrap_text(card.ai_reasoning, width=40):
+                for line in self._wrap_text(data['ai_reasoning'], width=40):
                     widgets.append(urwid.Text(('reasoning_ai', f"  {line}")))
                 widgets.append(urwid.Divider())
             
             # Обоснование от алгоритма
-            if card.algorithmic_reasoning:
+            if data.get('algorithmic_reasoning'):
                 widgets.append(urwid.Text(('reasoning_algo', "⚙️ Обоснование алгоритма:")))
-                for line in self._wrap_text(card.algorithmic_reasoning, width=40):
+                for line in self._wrap_text(data['algorithmic_reasoning'], width=40):
                     widgets.append(urwid.Text(('reasoning_algo', f"  {line}")))
                 widgets.append(urwid.Divider())
             
             # История перемещений
-            if card.move_history:
-                widgets.append(urwid.Text(('directory', f"📜 История ({len(card.move_history)} перемещений):")))
-                for move in card.move_history[-5:]:  # Показываем последние 5
+            if data.get('move_history'):
+                widgets.append(urwid.Text(('directory', f"📜 История ({len(data['move_history'])} перемещений):")))
+                for move in data['move_history']:
                     ts = move.get('timestamp', '')[:16].replace('T', ' ')
                     reason = move.get('reason', '')
                     widgets.append(urwid.Text(
                         ('path_info', f"  {ts} [{reason}]")
                     ))
         else:
-            if entry.is_dir:
+            if data.get('is_dir'):
                 widgets.append(urwid.Text("📁 Директория"))
             else:
                 widgets.append(urwid.Text(('error', "⚠️ Нет информации provenance")))
@@ -282,7 +372,7 @@ class FileBrowser:
         
         return lines
     
-    def _update_footer(self):
+    def update_footer(self) -> None:
         """Обновить нижнюю панель с подсказками."""
         help_text = (
             "[↑↓] Навигация  "
@@ -291,65 +381,70 @@ class FileBrowser:
             "[R] Обновить  "
             "[Q] Выход"
         )
-        self.footer.original_widget.set_text(help_text)
+        self.footer_text.set_text(help_text)
     
-    def handle_input(self, key):
+    def set_focus_position(self, index: int) -> None:
+        """Установить позицию фокуса в списке файлов."""
+        if self.vm.entries and 0 <= index < len(self.vm.entries):
+            self.file_walker.set_focus(index)
+            self.file_listbox.focus_position = index
+
+
+class FileBrowser:
+    """Основное приложение файлового браузера.
+    
+    Координирует взаимодействие между ViewModel и View.
+    """
+    
+    def __init__(self, target_dir: str):
+        self.provenance = ProvenanceStore(os.path.abspath(target_dir))
+        self.vm = FileBrowserViewModel(target_dir, self.provenance)
+        self.view = FileBrowserView(self.vm)
+        
+        self.view.update_footer()
+        self.vm.load_directory()
+        self.view.render_file_list()
+        self.view.render_reasoning_panel()
+    
+    def handle_input(self, key) -> None:
         """Обработка ввода пользователя."""
         if key in ('up', 'k'):
-            if self.selected_index > 0:
-                self.selected_index -= 1
-                self._update_file_list()
-                self._update_reasoning()
+            if self.vm.navigate_up():
+                self.view.render_file_list()
+                self.view.render_reasoning_panel()
         
         elif key in ('down', 'j'):
-            if self.selected_index < len(self.entries) - 1:
-                self.selected_index += 1
-                self._update_file_list()
-                self._update_reasoning()
+            if self.vm.navigate_down():
+                self.view.render_file_list()
+                self.view.render_reasoning_panel()
         
         elif key in ('enter', 'right', 'l'):
-            self._open_selected()
+            new_path = self.vm.open_selected()
+            if new_path is not None:
+                # Перешли в директорию
+                self.vm.load_directory(new_path)
+                self.view.render_file_list()
+                self.view.render_reasoning_panel()
         
         elif key in ('backspace', 'left', 'h'):
-            self._go_back()
+            new_path = self.vm.go_back()
+            if new_path is not None:
+                self.vm.load_directory(new_path)
+                self.view.render_file_list()
+                self.view.render_reasoning_panel()
         
         elif key in ('r', 'R'):
-            self._load_directory()
+            self.vm.refresh()
+            self.view.render_file_list()
+            self.view.render_reasoning_panel()
         
         elif key in ('q', 'Q', 'esc'):
             raise urwid.ExitMainLoop()
     
-    def _open_selected(self):
-        """Открыть выбранный элемент."""
-        if not self.entries or self.selected_index >= len(self.entries):
-            return
-        
-        entry = self.entries[self.selected_index]
-        
-        if entry.name == "..":
-            self._go_back()
-            return
-        
-        if entry.is_dir:
-            self.history.append(self.current_path)
-            self.current_path = entry.path
-            self.selected_index = 0
-            self._load_directory()
-    
-    def _go_back(self):
-        """Вернуться назад."""
-        if self.history:
-            self.current_path = self.history.pop()
-            self.selected_index = 0
-            self._load_directory()
-        elif self.current_path != self.target_dir:
-            self.current_path = os.path.dirname(self.current_path)
-            self.selected_index = 0
-            self._load_directory()
-    
     def run(self):
         """Запустить приложение."""
-        self.main_loop.run()
+        main_loop = self.view.create_main_loop(self.handle_input)
+        main_loop.run()
 
 
 def main():
