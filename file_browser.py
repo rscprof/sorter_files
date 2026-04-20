@@ -98,16 +98,20 @@ class FileBrowserViewModel:
         self.selected_index = 0
     
     def navigate_up(self) -> bool:
-        """Переместиться вверх. Возвращает True если удалось."""
-        if self.selected_index > 0:
-            self.selected_index -= 1
+        """Переместиться вверх. Возвращает True если удалось.
+        
+        Прокрутка выполняется только при нахождении в крайней верхней позиции.
+        """
+        if self.selected_index == 0:
             return True
         return False
     
     def navigate_down(self) -> bool:
-        """Переместиться вниз. Возвращает True если удалось."""
-        if self.selected_index < len(self.entries) - 1:
-            self.selected_index += 1
+        """Переместиться вниз. Возвращает True если удалось.
+        
+        Прокрутка выполняется только при нахождении в крайней нижней позиции.
+        """
+        if self.entries and self.selected_index == len(self.entries) - 1:
             return True
         return False
     
@@ -322,11 +326,26 @@ class FileBrowserView:
                 focus_idx = max(0, min(self.vm.selected_index, len(self.vm.entries) - 1))
                 self.file_walker.set_focus(focus_idx)
                 # Важно: устанавливаем focus_position для ListBox чтобы предотвратить
-                # некорректное поведение прокрутки
+                # некорректное поведение прокрутки. При навигации вверх/вниз мы должны
+                # оставаться на текущей позиции пока не достигнем края списка.
                 self.file_listbox.focus_position = focus_idx
             except (TypeError, AttributeError):
                 # Для тестов с mock объектами
                 pass
+    
+    def scroll_up(self) -> None:
+        """Выполнить прокрутку вверх (перемещение на предыдущий элемент)."""
+        if self.vm.selected_index > 0:
+            self.vm.selected_index -= 1
+            self.render_file_list()
+            self.render_reasoning_panel()
+    
+    def scroll_down(self) -> None:
+        """Выполнить прокрутку вниз (перемещение на следующий элемент)."""
+        if self.vm.entries and self.vm.selected_index < len(self.vm.entries) - 1:
+            self.vm.selected_index += 1
+            self.render_file_list()
+            self.render_reasoning_panel()
     
     def render_reasoning_panel(self) -> None:
         """Отрисовать панель обоснований."""
@@ -461,13 +480,19 @@ class FileBrowser:
         """Обработка ввода пользователя."""
         if key in ('up', 'k'):
             if self.vm.navigate_up():
-                self.view.render_file_list()
-                self.view.render_reasoning_panel()
+                # Находимся в крайней верхней позиции - выполняем прокрутку вверх
+                self.view.scroll_up()
+            else:
+                # Не в крайней позиции - просто перемещаем выделение вверх
+                self.view.scroll_up()
         
         elif key in ('down', 'j'):
             if self.vm.navigate_down():
-                self.view.render_file_list()
-                self.view.render_reasoning_panel()
+                # Находимся в крайней нижней позиции - выполняем прокрутку вниз
+                self.view.scroll_down()
+            else:
+                # Не в крайней позиции - просто перемещаем выделение вниз
+                self.view.scroll_down()
         
         elif key in ('enter', 'right', 'l'):
             new_path = self.vm.open_selected()
