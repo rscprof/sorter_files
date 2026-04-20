@@ -398,7 +398,28 @@ class FileBrowserView:
             palette=self.PALETTE,
             unhandled_input=input_handler,
         )
+        # Инициализируем _viewport_height после создания main_loop
+        self._viewport_height = self._get_viewport_height()
         return self.main_loop
+    
+    def _get_viewport_height(self) -> int:
+        """Получить высоту видимой области списка файлов.
+        
+        Returns:
+            Количество строк видимой области списка.
+        """
+        try:
+            # Получаем размер экрана от main_loop
+            if self.main_loop and hasattr(self.main_loop, 'screen'):
+                _, height = self.main_loop.screen.get_cols_lines()
+                # Вычитаем высоту header и footer (примерно 3-4 строки)
+                # Header: 1 строка, Footer: 1 строка, divider'ы: ~2 строки
+                return max(1, height - 4)
+            # Fallback: используем последнее известное значение
+            return getattr(self, '_viewport_height', 20)
+        except Exception:
+            # Если не удалось получить размер, используем последнее известное значение
+            return getattr(self, '_viewport_height', 20)
     
     def render_file_list(self) -> None:
         """Отрисовать список файлов.
@@ -409,7 +430,7 @@ class FileBrowserView:
         self.file_walker.clear()
         
         # Получаем высоту viewport для определения видимых элементов
-        viewport_height = self._get_viewport_height() if hasattr(self, '_get_viewport_height') else 20
+        viewport_height = self._get_viewport_height()
         
         # Определяем диапазон видимых элементов
         start_index = max(0, self.vm.top_index)
