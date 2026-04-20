@@ -171,6 +171,11 @@ class ProvenanceStore:
                 card.ai_reasoning = ai_reasoning
             if algorithmic_reasoning:
                 card.algorithmic_reasoning = algorithmic_reasoning
+            # Обновляем информацию об архиве если предоставлена
+            if archive_source:
+                card.archive_source = archive_source
+            if archive_extract_dir:
+                card.archive_extract_dir = archive_extract_dir
         else:
             # Новая карточка
             card = ProvenanceCard(
