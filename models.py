@@ -107,6 +107,10 @@ class FileInfo:
     target_path: str = ""
     error: str = ""
 
+    # Обоснования
+    ai_reasoning: str = ""                    # От нейронной сети
+    algorithmic_reasoning: str = ""           # От алгоритмического кода/правил
+
     def to_dict(self) -> dict:
         d = asdict(self)
         if self.image_metadata:
