@@ -578,6 +578,26 @@ class FileBrowser:
         self.vm.load_directory()
         self.view.render_file_list()
         self.view.render_reasoning_panel()
+        self._viewport_height = 20  # Значение по умолчанию будет обновлено при первом вызове handle_input
+    
+    def _get_viewport_height(self) -> int:
+        """Получить высоту видимой области списка файлов.
+        
+        Returns:
+            Количество строк видимой области списка.
+        """
+        try:
+            # Получаем размер экрана от main_loop
+            if self.view.main_loop and hasattr(self.view.main_loop, 'screen'):
+                _, height = self.view.main_loop.screen.get_cols_lines()
+                # Вычитаем высоту header и footer (примерно 3-4 строки)
+                # Header: 1 строка, Footer: 1 строка, divider'ы: ~2 строки
+                return max(1, height - 4)
+            # Fallback: используем последнее известное значение или количество элементов
+            return self._viewport_height if hasattr(self, '_viewport_height') else max(1, len(self.vm.entries))
+        except Exception:
+            # Если не удалось получить размер, используем последнее известное значение
+            return getattr(self, '_viewport_height', 20)
     
     def handle_input(self, key) -> None:
         """Обработка ввода пользователя."""

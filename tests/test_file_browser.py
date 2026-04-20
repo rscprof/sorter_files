@@ -509,7 +509,7 @@ class TestViewModelNavigation:
         vm.top_index = 3
         
         # navigation_up должен уменьшить selected_index
-        result = vm.navigation_up()
+        result = vm.navigation_up(viewport_height=10)
         assert result is False  # Прокрутки не было
         assert vm.selected_index == 4
         assert vm.top_index == 3  # top_index не изменился
@@ -518,7 +518,7 @@ class TestViewModelNavigation:
         vm.selected_index = 3
         
         # navigation_up должен уменьшить selected_index и top_index
-        result = vm.navigation_up()
+        result = vm.navigation_up(viewport_height=10)
         assert result is False  # Прокрутки не было (просто перемещение выделения)
         assert vm.selected_index == 2
         assert vm.top_index == 2  # top_index подстроился под selected_index
@@ -527,7 +527,7 @@ class TestViewModelNavigation:
         vm.selected_index = 0
         vm.top_index = 5
         
-        result = vm.navigation_up()
+        result = vm.navigation_up(viewport_height=10)
         assert result is True  # Была прокрутка
         assert vm.selected_index == 0  # selected_index не изменился
         assert vm.top_index == 4  # top_index уменьшился
@@ -672,25 +672,25 @@ class TestFileBrowserNavigation:
         vm.top_index = 2
         
         # navigation_up должен уменьшить selected_index
-        result = vm.navigation_up()
+        result = vm.navigation_up(viewport_height=10)
         assert result is False
         assert vm.selected_index == 2
         assert vm.top_index == 2  # top_index подстроился
         
         # Ещё раз navigation_up
-        result = vm.navigation_up()
+        result = vm.navigation_up(viewport_height=10)
         assert result is False
         assert vm.selected_index == 1
         assert vm.top_index == 1
         
         # Ещё раз - теперь selected_index == 0
-        result = vm.navigation_up()
+        result = vm.navigation_up(viewport_height=10)
         assert result is False
         assert vm.selected_index == 0
         assert vm.top_index == 0
         
         # Теперь selected_index == 0 и top_index == 0 - достигнут край
-        result = vm.navigation_up()
+        result = vm.navigation_up(viewport_height=10)
         assert result is False  # Прокрутка невозможна,已达 край
     
     def test_navigation_down_integration(self, sample_dir):

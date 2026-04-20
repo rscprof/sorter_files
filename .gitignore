@@ -1,1 +1,4 @@
-(file_browser.py is a source file, so no .gitignore rules needed)
+```
+__pycache__/
+*.pyc
+```
