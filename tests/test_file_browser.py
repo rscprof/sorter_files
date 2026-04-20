@@ -238,36 +238,226 @@ class TestFileBrowserView:
         vm.get_reasoning_data.return_value = {"empty": True}
         return vm
     
-    def test_render_file_list(self, mock_vm):
+    @pytest.fixture
+    def mock_handler(self):
+        """Создать mock обработчик ввода."""
+        return Mock()
+    
+    def test_render_file_list(self, mock_vm, mock_handler):
         """Тест отрисовки списка файлов."""
         from file_browser import FileBrowserView
         
-        view = FileBrowserView(mock_vm)
+        view = FileBrowserView(mock_vm, mock_handler)
         view.render_file_list()
         
         # Проверяем что walker не пустой
         assert len(view.file_walker) == 3
     
-    def test_render_file_list_sets_focus(self, mock_vm):
+    def test_render_file_list_sets_focus(self, mock_vm, mock_handler):
         """Тест установки фокуса при отрисовке."""
         from file_browser import FileBrowserView
         
         mock_vm.selected_index = 1
-        view = FileBrowserView(mock_vm)
+        view = FileBrowserView(mock_vm, mock_handler)
         view.render_file_list()
         
         # Проверяем что фокус установлен корректно
         assert view.file_walker.focus == 1
     
-    def test_update_footer(self, mock_vm):
+    def test_update_footer(self, mock_vm, mock_handler):
         """Тест обновления footer."""
         from file_browser import FileBrowserView
         
-        view = FileBrowserView(mock_vm)
+        view = FileBrowserView(mock_vm, mock_handler)
         view.update_footer()
         
         assert "Навигация" in view.footer_text.text
         assert "Выход" in view.footer_text.text
+
+
+class TestNavigableListBox:
+    """Тесты кастомного ListBox с перехватом клавиш."""
+    
+    def test_navigable_listbox_intercepts_navigation_keys(self):
+        """Тест что NavigableListBox перехватывает навигационные клавиши."""
+        from file_browser import NavigableListBox
+        import urwid
+        
+        handler_called = []
+        
+        def mock_handler(key):
+            handler_called.append(key)
+            return True
+        
+        walker = urwid.SimpleFocusListWalker([
+            urwid.Text("item1"),
+            urwid.Text("item2"),
+        ])
+        listbox = NavigableListBox(walker, mock_handler)
+        
+        # Симулируем нажатие клавиши вниз
+        result = listbox.keypress((10,), 'down')
+        
+        # Клавиша должна быть перехвачена (возвращает None)
+        assert result is None
+        assert 'down' in handler_called
+    
+    def test_navigable_listbox_calls_handler_with_up_key(self):
+        """Тест что обработчик вызывается с клавишей up."""
+        from file_browser import NavigableListBox
+        import urwid
+        
+        handler_called = []
+        
+        def mock_handler(key):
+            handler_called.append(key)
+            return True
+        
+        walker = urwid.SimpleFocusListWalker([urwid.Text("item")])
+        listbox = NavigableListBox(walker, mock_handler)
+        
+        listbox.keypress((10,), 'up')
+        
+        assert 'up' in handler_called
+    
+    def test_navigable_listbox_passes_through_unhandled_keys(self):
+        """Тест что необработанные клавиши передаются дальше."""
+        from file_browser import NavigableListBox
+        import urwid
+        
+        def mock_handler_false(key):
+            return False  # Обработчик не обработал клавишу
+        
+        walker = urwid.SimpleFocusListWalker([urwid.Text("item")])
+        listbox = NavigableListBox(walker, mock_handler_false)
+        
+        # Если обработчик вернул False, ListBox должен вернуть ключ
+        # Используем корректный размер (maxcol, maxrow)
+        result = listbox.keypress((20, 10), 'unknown_key')
+        
+        # Ключ должен быть возвращён для дальнейшей обработки (urwid заменяет _ на пробел)
+        assert result == 'unknown_key'
+    
+    def test_view_handle_keypress_calls_input_handler(self):
+        """Тест что View._handle_keypress вызывает переданный обработчик."""
+        from file_browser import FileBrowserView
+        from unittest.mock import Mock
+        
+        mock_vm = Mock()
+        mock_vm.entries = []
+        mock_vm.get_entries_for_display.return_value = []
+        mock_vm.get_reasoning_data.return_value = {"empty": True}
+        
+        input_handler = Mock()
+        view = FileBrowserView(mock_vm, input_handler)
+        
+        # Вызываем внутренний обработчик
+        result = view._handle_keypress('down')
+        
+        # Обработчик должен быть вызван
+        input_handler.assert_called_once_with('down')
+        assert result is True
+    
+    def test_view_handle_keypress_returns_false_for_unknown_keys(self):
+        """Тест что неизвестные клавиши возвращают False."""
+        from file_browser import FileBrowserView
+        from unittest.mock import Mock
+        
+        mock_vm = Mock()
+        mock_vm.entries = []
+        mock_vm.get_entries_for_display.return_value = []
+        mock_vm.get_reasoning_data.return_value = {"empty": True}
+        
+        input_handler = Mock(side_effect=Exception("Test error"))
+        view = FileBrowserView(mock_vm, input_handler)
+        
+        # Если обработчик выбрасывает исключение, должно вернуться False
+        result = view._handle_keypress('some_key')
+        
+        assert result is False
+    
+    def test_view_handle_keypress_propagates_exit_main_loop(self):
+        """Тест что ExitMainLoop пробрасывается дальше."""
+        from file_browser import FileBrowserView
+        import urwid
+        from unittest.mock import Mock
+        
+        mock_vm = Mock()
+        mock_vm.entries = []
+        mock_vm.get_entries_for_display.return_value = []
+        mock_vm.get_reasoning_data.return_value = {"empty": True}
+        
+        def raise_exit(key):
+            raise urwid.ExitMainLoop()
+        
+        view = FileBrowserView(mock_vm, raise_exit)
+        
+        with pytest.raises(urwid.ExitMainLoop):
+            view._handle_keypress('q')
+
+
+class TestViewModelNavigation:
+    """Дополнительные тесты навигации ViewModel."""
+    
+    @pytest.fixture
+    def sample_dir(self, tmp_path):
+        """Создать тестовую директорию с несколькими файлами."""
+        for i in range(10):
+            (tmp_path / f"file{i}.txt").write_text(f"content{i}")
+        return str(tmp_path)
+    
+    def test_navigate_down_multiple_times(self, sample_dir):
+        """Тест многократной навигации вниз."""
+        from file_browser import FileBrowserViewModel
+        from provenance import ProvenanceStore
+        
+        provenance = ProvenanceStore(sample_dir)
+        vm = FileBrowserViewModel(sample_dir, provenance)
+        vm.load_directory()
+        
+        initial_count = len(vm.entries)
+        
+        # Нажимаем вниз несколько раз
+        for i in range(5):
+            result = vm.navigate_down()
+            assert result is True
+            assert vm.selected_index == i + 1
+    
+    def test_navigate_up_from_middle(self, sample_dir):
+        """Тест навигации вверх из середины списка."""
+        from file_browser import FileBrowserViewModel
+        from provenance import ProvenanceStore
+        
+        provenance = ProvenanceStore(sample_dir)
+        vm = FileBrowserViewModel(sample_dir, provenance)
+        vm.load_directory()
+        
+        # Перемещаемся в середину
+        vm.selected_index = 5
+        
+        # Вверх
+        vm.navigate_up()
+        assert vm.selected_index == 4
+    
+    def test_boundary_conditions_navigation(self, sample_dir):
+        """Тест граничных условий навигации."""
+        from file_browser import FileBrowserViewModel
+        from provenance import ProvenanceStore
+        
+        provenance = ProvenanceStore(sample_dir)
+        vm = FileBrowserViewModel(sample_dir, provenance)
+        vm.load_directory()
+        
+        # Находимся в начале - up должен вернуть False
+        assert vm.navigate_up() is False
+        assert vm.selected_index == 0
+        
+        # Перемещаемся в конец
+        vm.selected_index = len(vm.entries) - 1
+        
+        # down должен вернуть False
+        assert vm.navigate_down() is False
+        assert vm.selected_index == len(vm.entries) - 1
 
 
 class TestFileBrowserNavigation:
