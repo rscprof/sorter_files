@@ -401,16 +401,49 @@ class FileBrowserView:
         return self.main_loop
     
     def render_file_list(self) -> None:
-        """Отрисовать список файлов."""
+        """Отрисовать список файлов.
+        
+        Добавляет в ListBox только видимые элементы для корректной работы
+        скроллинга и предотвращения проблем с выделением.
+        """
         self.file_walker.clear()
         
-        for display_name, base_style, focus_style in self.vm.get_entries_for_display():
+        # Получаем высоту viewport для определения видимых элементов
+        viewport_height = self._get_viewport_height() if hasattr(self, '_get_viewport_height') else 20
+        
+        # Определяем диапазон видимых элементов
+        start_index = max(0, self.vm.top_index)
+        end_index = min(len(self.vm.entries), start_index + viewport_height)
+        
+        # Добавляем placeholder'ы перед видимыми элементами для сохранения правильных индексов
+        # Это нужно чтобы focus_position корректно работал
+        for i in range(start_index):
+            dummy_widget = urwid.AttrMap(
+                urwid.Text(""),
+                'file',
+                'file_focus'
+            )
+            self.file_walker.append(dummy_widget)
+        
+        # Добавляем только видимые элементы
+        all_entries_data = self.vm.get_entries_for_display()
+        for i in range(start_index, end_index):
+            display_name, base_style, focus_style = all_entries_data[i]
             widget = urwid.AttrMap(
                 urwid.Text(display_name),
                 base_style,
                 focus_style
             )
             self.file_walker.append(widget)
+        
+        # Добавляем placeholder'ы после видимых элементов
+        for i in range(end_index, len(self.vm.entries)):
+            dummy_widget = urwid.AttrMap(
+                urwid.Text(""),
+                'file',
+                'file_focus'
+            )
+            self.file_walker.append(dummy_widget)
         
         # Устанавливаем фокус корректно
         if self.vm.entries:
@@ -421,17 +454,12 @@ class FileBrowserView:
                 # некорректное поведение прокрутки. При навигации вверх/вниз мы должны
                 # оставаться на текущей позиции пока не достигнем края списка.
                 self.file_listbox.focus_position = focus_idx
-                # Устанавливаем offset_rows для управления видимой областью списка.
-                # offset_rows в urwid.ListBox - это смещение первого видимого элемента
-                # относительно фокуса: first_visible = focus_position - offset_rows
-                # Поэтому: offset_rows = focus_position - top_index
-                # Важно: устанавливаем offset_rows ПОСЛЕ focus_position и перед render,
-                # чтобы urwid не перезаписал наше значение во время рендеринга
-                target_offset = focus_idx - self.vm.top_index
-                # Ограничиваем offset_rows допустимым диапазоном
-                max_offset = focus_idx  # Нельзя показать элементы قبل начала списка
-                min_offset = max(0, focus_idx - (len(self.vm.entries) - 1))  # Нельзя показать больше чем есть элементов
-                self.file_listbox.offset_rows = max(min_offset, min(max_offset, target_offset))
+                # При использовании placeholder'ов offset_rows должен быть 0, потому что
+                # все элементы уже находятся на своих позициях в списке.
+                # ListBox сам отобразит нужную область благодаря focus_position.
+                # Важно: не устанавливаем offset_rows явно, чтобы urwid мог управлять
+                # прокруткой на основе focus_position
+                self.file_listbox.offset_rows = 0
             except (TypeError, AttributeError):
                 # Для тестов с mock объектами
                 pass
