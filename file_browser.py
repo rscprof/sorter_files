@@ -418,9 +418,11 @@ class FileBrowserView:
                 # некорректное поведение прокрутки. При навигации вверх/вниз мы должны
                 # оставаться на текущей позиции пока не достигнем края списка.
                 self.file_listbox.focus_position = focus_idx
-                # Устанавливаем top_index для управления видимой областью списка
-                # Это обеспечивает прокрутку только при достижении крайних позиций
-                self.file_listbox.offset_rows = self.vm.top_index
+                # Устанавливаем offset_rows для управления видимой областью списка.
+                # offset_rows в urwid.ListBox - это смещение первого видимого элемента
+                # относительно фокуса: first_visible = focus_position - offset_rows
+                # Поэтому: offset_rows = focus_position - top_index
+                self.file_listbox.offset_rows = focus_idx - self.vm.top_index
             except (TypeError, AttributeError):
                 # Для тестов с mock объектами
                 pass

@@ -736,6 +736,101 @@ class TestFileBrowserNavigation:
         assert result is False  # Прокрутка невозможна,已达 край
 
 
+class TestRenderFileListWithTopIndex:
+    """Тесты корректной отрисовки списка с учётом top_index."""
+    
+    @pytest.fixture
+    def sample_dir(self, tmp_path):
+        """Создать тестовую директорию с несколькими файлами."""
+        for i in range(20):
+            (tmp_path / f"file{i}.txt").write_text(f"content{i}")
+        return str(tmp_path)
+    
+    def test_offset_rows_calculation(self, sample_dir):
+        """Тест что offset_rows вычисляется правильно как focus_idx - top_index."""
+        from file_browser import FileBrowserViewModel, FileBrowserView
+        from provenance import ProvenanceStore
+        from unittest.mock import Mock
+        
+        provenance = ProvenanceStore(sample_dir)
+        vm = FileBrowserViewModel(sample_dir, provenance)
+        vm.load_directory()
+        
+        # Устанавливаем конкретные значения
+        vm.selected_index = 10
+        vm.top_index = 3
+        
+        mock_handler = Mock()
+        view = FileBrowserView(vm, mock_handler)
+        view.render_file_list()
+        
+        # Проверяем что offset_rows вычислен правильно
+        expected_offset_rows = vm.selected_index - vm.top_index
+        assert view.file_listbox.offset_rows == expected_offset_rows
+    
+    def test_offset_rows_zero_when_selected_equals_top(self, sample_dir):
+        """Тест что offset_rows=0 когда selected_index == top_index."""
+        from file_browser import FileBrowserViewModel, FileBrowserView
+        from provenance import ProvenanceStore
+        from unittest.mock import Mock
+        
+        provenance = ProvenanceStore(sample_dir)
+        vm = FileBrowserViewModel(sample_dir, provenance)
+        vm.load_directory()
+        
+        vm.selected_index = 5
+        vm.top_index = 5
+        
+        mock_handler = Mock()
+        view = FileBrowserView(vm, mock_handler)
+        view.render_file_list()
+        
+        assert view.file_listbox.offset_rows == 0
+    
+    def test_offset_rows_at_start(self, sample_dir):
+        """Тест что offset_rows=0 в начале списка."""
+        from file_browser import FileBrowserViewModel, FileBrowserView
+        from provenance import ProvenanceStore
+        from unittest.mock import Mock
+        
+        provenance = ProvenanceStore(sample_dir)
+        vm = FileBrowserViewModel(sample_dir, provenance)
+        vm.load_directory()
+        
+        vm.selected_index = 0
+        vm.top_index = 0
+        
+        mock_handler = Mock()
+        view = FileBrowserView(vm, mock_handler)
+        view.render_file_list()
+        
+        assert view.file_listbox.offset_rows == 0
+    
+    def test_offset_rows_at_end(self, sample_dir):
+        """Тест что offset_rows вычисляется правильно в конце списка."""
+        from file_browser import FileBrowserViewModel, FileBrowserView
+        from provenance import ProvenanceStore
+        from unittest.mock import Mock
+        
+        provenance = ProvenanceStore(sample_dir)
+        vm = FileBrowserViewModel(sample_dir, provenance)
+        vm.load_directory()
+        
+        viewport_height = 5
+        max_index = len(vm.entries) - 1
+        max_top_index = max(0, len(vm.entries) - viewport_height)
+        
+        vm.selected_index = max_index
+        vm.top_index = max_top_index
+        
+        mock_handler = Mock()
+        view = FileBrowserView(vm, mock_handler)
+        view.render_file_list()
+        
+        expected_offset_rows = max_index - max_top_index
+        assert view.file_listbox.offset_rows == expected_offset_rows
+
+
 class TestProvenanceWithReasoning:
     """Тесты provenance с обоснованиями."""
     
