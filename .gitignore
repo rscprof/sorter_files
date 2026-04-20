@@ -1,4 +1,1 @@
-```
-__pycache__/
-*.pyc
-```
+Nothing needs to be added to the .gitignore file based on the provided changes. The only modified file is 'provenance.py', which is a source code file and should not be ignored. There are no build artifacts, dependency directories, or other files that require ignoring.
