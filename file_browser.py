@@ -44,7 +44,9 @@ class FileBrowser:
         ('header', 'white', 'dark blue', 'bold'),
         ('footer', 'white', 'dark gray'),
         ('directory', 'yellow', 'default', 'bold'),
+        ('directory_focus', 'black', 'yellow', 'bold'),
         ('file', 'light gray', 'default'),
+        ('file_focus', 'black', 'light gray', 'bold'),
         ('selected', 'black', 'light gray'),
         ('reasoning_ai', 'light cyan', 'default'),
         ('reasoning_algo', 'light green', 'default'),
@@ -162,17 +164,20 @@ class FileBrowser:
             if entry.name == "..":
                 widget = urwid.AttrMap(
                     urwid.Text("📁 .."),
-                    'directory'
+                    'directory',
+                    'directory_focus'
                 )
             elif entry.is_dir:
                 widget = urwid.AttrMap(
                     urwid.Text(f"📁 {entry.name}/"),
-                    'directory'
+                    'directory',
+                    'directory_focus'
                 )
             else:
                 widget = urwid.AttrMap(
                     urwid.Text(f"📄 {entry.name}"),
-                    'file'
+                    'file',
+                    'file_focus'
                 )
             
             self.walker.append(widget)
