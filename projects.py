@@ -17,53 +17,38 @@ def is_project_directory(dirpath: str) -> bool:
     except OSError:
         return False
     
-    # Проверка на наличие src/ или подобных каталогов — признак проекта
-    # Но сами по себе эти каталоги не делают директорию проектом — 
-    # они должны быть в сочетании с другими индикаторами
-    src_dirs = {"src", "include", "lib", "source", "sources", "app", "core"}
-    has_src_dir = False
-    for entry in entries:
-        if entry.lower() in src_dirs and os.path.isdir(os.path.join(dirpath, entry)):
-            has_src_dir = True
-            break
+    # Имена каталогов-контейнеров (src, include и т.д.) — это индикаторы проекта
+    # только когда они находятся ВНУТРИ директории, а не когда сама директория так называется
+    container_dirs = {"src", "include", "lib", "source", "sources", "app", "core"}
     
-    # Если есть только src-каталог без других индикаторов — это ещё не проект
-    # (чтобы не считать проектом просто каталог с исходниками)
-    has_other_indicator = False
+    # Проверка на наличие индикаторов проекта (файлы конфигурации, .git и т.д.)
+    has_indicator = False
     for entry in entries:
         for indicator in PROJECT_INDICATORS:
             if indicator.startswith("*"):
                 if fnmatch.fnmatch(entry, indicator):
-                    has_other_indicator = True
+                    has_indicator = True
                     break
             elif indicator.endswith("/"):
                 # Директорный индикатор (например, "src/")
                 dir_name = indicator.rstrip("/")
+                # Пропускаем контейнерные директории - они не делают текущую папку проектом
+                if dir_name.lower() in container_dirs:
+                    continue
                 if entry.lower() == dir_name.lower() and os.path.isdir(os.path.join(dirpath, entry)):
-                    has_other_indicator = True
+                    has_indicator = True
                     break
             elif entry == indicator:
-                has_other_indicator = True
+                # Пропускаем файлы main.* если это единственный файл в директории-контейнере
+                # (чтобы src/main.py не считался проектом сам по себе)
+                if entry.lower().startswith("main.") and len(entries) == 1:
+                    continue
+                has_indicator = True
                 break
-        if has_other_indicator:
+        if has_indicator:
             break
     
-    # Считаем проектом если есть другие индикаторы ИЛИ (src-каталог + другие признаки)
-    # Для простоты: src-каталог сам по себе достаточно для C++ проектов
-    # но чтобы избежать ложных срабатываний, требуем хотя бы один файл кода
-    # ВАЖНО: src-каталог внутри другой директории делает ПРОЕКТ родительскую директорию,
-    # а не сам src. Поэтому проверяем что мы НЕ внутри src-каталога.
-    if has_src_dir:
-        code_exts = {".cpp", ".c", ".h", ".hpp", ".py", ".js", ".ts", ".java", ".go", ".rs"}
-        for entry in entries:
-            if any(entry.lower().endswith(ext) for ext in code_exts):
-                # Проверяем что это не просто src-подкаталог без корневых файлов проекта
-                # Если в директории ТОЛЬКО src и файлы кода — это вероятно подкаталог
-                non_src_entries = [e for e in entries if e.lower() not in src_dirs]
-                if len(non_src_entries) > 0:
-                    return True
-    
-    return has_other_indicator
+    return has_indicator
 
 
 def find_project_root(filepath: str, max_depth: int = 6) -> Optional[str]:
