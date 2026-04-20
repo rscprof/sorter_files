@@ -422,7 +422,13 @@ class FileBrowserView:
                 # offset_rows в urwid.ListBox - это смещение первого видимого элемента
                 # относительно фокуса: first_visible = focus_position - offset_rows
                 # Поэтому: offset_rows = focus_position - top_index
-                self.file_listbox.offset_rows = focus_idx - self.vm.top_index
+                # Важно: устанавливаем offset_rows ПОСЛЕ focus_position и перед render,
+                # чтобы urwid не перезаписал наше значение во время рендеринга
+                target_offset = focus_idx - self.vm.top_index
+                # Ограничиваем offset_rows допустимым диапазоном
+                max_offset = focus_idx  # Нельзя показать элементы قبل начала списка
+                min_offset = max(0, focus_idx - (len(self.vm.entries) - 1))  # Нельзя показать больше чем есть элементов
+                self.file_listbox.offset_rows = max(min_offset, min(max_offset, target_offset))
             except (TypeError, AttributeError):
                 # Для тестов с mock объектами
                 pass
