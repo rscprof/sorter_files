@@ -251,6 +251,8 @@ class TestFileBrowserView:
             ("📄 file2.txt", 'file', 'file_focus'),
         ]
         vm.get_reasoning_data.return_value = {"empty": True}
+        vm.selected_index = 0
+        vm.top_index = 0
         return vm
     
     @pytest.fixture
@@ -737,7 +739,7 @@ class TestFileBrowserNavigation:
 
 
 class TestRenderFileListWithTopIndex:
-    """Тесты корректной отрисовки списка с учётом top_index."""
+    """Тесты корректной отрисовки списка с учётом top_index и placeholder'ов."""
     
     @pytest.fixture
     def sample_dir(self, tmp_path):
@@ -746,8 +748,8 @@ class TestRenderFileListWithTopIndex:
             (tmp_path / f"file{i}.txt").write_text(f"content{i}")
         return str(tmp_path)
     
-    def test_offset_rows_calculation(self, sample_dir):
-        """Тест что offset_rows вычисляется правильно как focus_idx - top_index."""
+    def test_visible_elements_only(self, sample_dir):
+        """Тест что в ListBox добавляются только видимые элементы + placeholder'ы."""
         from file_browser import FileBrowserViewModel, FileBrowserView
         from provenance import ProvenanceStore
         from unittest.mock import Mock
@@ -756,20 +758,59 @@ class TestRenderFileListWithTopIndex:
         vm = FileBrowserViewModel(sample_dir, provenance)
         vm.load_directory()
         
-        # Устанавливаем конкретные значения
+        # Устанавливаем viewport_height = 5 для теста
         vm.selected_index = 10
-        vm.top_index = 3
+        vm.top_index = 8
+        
+        mock_handler = Mock()
+        view = FileBrowserView(vm, mock_handler)
+        view._viewport_height = 5
+        view.render_file_list()
+        
+        # Проверяем что общее количество элементов совпадает
+        assert len(view.file_walker) == len(vm.entries)
+        
+        # Подсчитываем видимые элементы (с текстом) и placeholder'ы
+        visible_count = 0
+        placeholder_count = 0
+        for widget in view.file_walker:
+            text = widget.original_widget.text
+            if text:
+                visible_count += 1
+            else:
+                placeholder_count += 1
+        
+        # Должно быть 5 видимых элементов (viewport_height)
+        assert visible_count == view._viewport_height
+        # Остальные - placeholder'ы
+        assert placeholder_count == len(vm.entries) - view._viewport_height
+    
+    def test_focus_position_correct(self, sample_dir):
+        """Тест что focus_position установлен корректно."""
+        from file_browser import FileBrowserViewModel, FileBrowserView
+        from provenance import ProvenanceStore
+        from unittest.mock import Mock
+        
+        provenance = ProvenanceStore(sample_dir)
+        vm = FileBrowserViewModel(sample_dir, provenance)
+        vm.load_directory()
+        
+        vm.selected_index = 10
+        vm.top_index = 8
         
         mock_handler = Mock()
         view = FileBrowserView(vm, mock_handler)
         view.render_file_list()
         
-        # Проверяем что offset_rows вычислен правильно
-        expected_offset_rows = vm.selected_index - vm.top_index
-        assert view.file_listbox.offset_rows == expected_offset_rows
+        # focus_position должен равняться selected_index
+        assert view.file_listbox.focus_position == vm.selected_index
+        
+        # Проверяем что элемент на позиции фокуса имеет текст
+        focused_widget = view.file_walker[vm.selected_index]
+        assert focused_widget.original_widget.text != ""
     
-    def test_offset_rows_zero_when_selected_equals_top(self, sample_dir):
-        """Тест что offset_rows=0 когда selected_index == top_index."""
+    def test_offset_rows_zero_with_placeholders(self, sample_dir):
+        """Тест что offset_rows=0 при использовании placeholder'ов."""
         from file_browser import FileBrowserViewModel, FileBrowserView
         from provenance import ProvenanceStore
         from unittest.mock import Mock
@@ -785,29 +826,11 @@ class TestRenderFileListWithTopIndex:
         view = FileBrowserView(vm, mock_handler)
         view.render_file_list()
         
+        # При использовании placeholder'ов offset_rows всегда 0
         assert view.file_listbox.offset_rows == 0
     
-    def test_offset_rows_at_start(self, sample_dir):
-        """Тест что offset_rows=0 в начале списка."""
-        from file_browser import FileBrowserViewModel, FileBrowserView
-        from provenance import ProvenanceStore
-        from unittest.mock import Mock
-        
-        provenance = ProvenanceStore(sample_dir)
-        vm = FileBrowserViewModel(sample_dir, provenance)
-        vm.load_directory()
-        
-        vm.selected_index = 0
-        vm.top_index = 0
-        
-        mock_handler = Mock()
-        view = FileBrowserView(vm, mock_handler)
-        view.render_file_list()
-        
-        assert view.file_listbox.offset_rows == 0
-    
-    def test_offset_rows_at_end(self, sample_dir):
-        """Тест что offset_rows вычисляется правильно в конце списка."""
+    def test_placeholder_structure(self, sample_dir):
+        """Тест структуры placeholder'ов в списке."""
         from file_browser import FileBrowserViewModel, FileBrowserView
         from provenance import ProvenanceStore
         from unittest.mock import Mock
@@ -817,18 +840,32 @@ class TestRenderFileListWithTopIndex:
         vm.load_directory()
         
         viewport_height = 5
-        max_index = len(vm.entries) - 1
-        max_top_index = max(0, len(vm.entries) - viewport_height)
-        
-        vm.selected_index = max_index
-        vm.top_index = max_top_index
+        # 20 элементов (включая ..), selected=10, top=8
+        vm.selected_index = 10
+        vm.top_index = 8
         
         mock_handler = Mock()
         view = FileBrowserView(vm, mock_handler)
+        view._viewport_height = viewport_height
         view.render_file_list()
         
-        expected_offset_rows = max_index - max_top_index
-        assert view.file_listbox.offset_rows == expected_offset_rows
+        start_index = max(0, vm.top_index)
+        end_index = min(len(vm.entries), start_index + viewport_height)
+        
+        # Первые start_index элементов - placeholder'ы (до видимой области)
+        for i in range(start_index):
+            assert view.file_walker[i].original_widget.text == "", \
+                f"Элемент {i} должен быть placeholder'ом"
+        
+        # Элементы start_index:end_index - видимые
+        for i in range(start_index, end_index):
+            assert view.file_walker[i].original_widget.text != "", \
+                f"Элемент {i} должен быть видимым"
+        
+        # Элементы после end_index - placeholder'ы (после видимой области)
+        for i in range(end_index, len(vm.entries)):
+            assert view.file_walker[i].original_widget.text == "", \
+                f"Элемент {i} должен быть placeholder'ом"
 
 
 class TestProvenanceWithReasoning:
