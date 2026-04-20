@@ -131,9 +131,9 @@ class FileOrganizer:
         lines.append(f"  {'─' * 10} {'─' * 6} {'─' * 8} {'─' * 7} {'─' * 7}")
         lines.append(f"  {'Итого':<12} {total_ok:>6} {total_err:>8} {total_skip:>7} {grand_total:>7}")
 
-        # Процент успеха
+        # Процент успеха (без учета skipped)
         if grand_total > 0:
-            pct = total_ok / grand_total * 100
+            pct = total_ok / (total_ok + total_err) * 100 if (total_ok + total_err) > 0 else 0
             lines.append(f"  Успех: {pct:.0f}%")
         
         # Неизвестные форматы
