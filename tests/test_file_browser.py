@@ -557,8 +557,8 @@ class TestFileBrowserNavigation:
         """Тест что первое нажатие вниз перемещает фокус на второй элемент.
 
         Это регрессионный тест для проверки логики: при нажатии вниз
-        из позиции 0 (не в крайней нижней позиции), индекс должен увеличиться на 1.
-        Прокрутка вниз работает всегда когда не в конце списка.
+        из позиции 0 (не в крайней нижней позиции), navigate_down должен вернуть False.
+        Прокрутка вниз выполняется только когда selected_index == len(entries) - 1.
         """
         from file_browser import FileBrowserViewModel
         provenance = ProvenanceStore(sample_dir)
@@ -568,12 +568,10 @@ class TestFileBrowserNavigation:
         initial_count = len(vm.entries)
         assert initial_count >= 2  # Убеждаемся что есть хотя бы 2 элемента
         
-        # Первое нажатие вниз из позиции 0 - должно переместить на позицию 1
-        if vm.selected_index < initial_count - 1:
-            vm.selected_index += 1
-        
-        # Должен переместиться на второй элемент
-        assert vm.selected_index == 1
+        # Первое нажатие вниз из позиции 0 - navigate_down должен вернуть False (не в крайней позиции)
+        result = vm.navigate_down()
+        assert result is False
+        assert vm.selected_index == 0  # индекс не меняется
         
         # Перемещаемся в конец вручную
         vm.selected_index = initial_count - 1

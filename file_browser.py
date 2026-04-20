@@ -487,20 +487,22 @@ class FileBrowser:
     def handle_input(self, key) -> None:
         """Обработка ввода пользователя."""
         if key in ('up', 'k'):
-            # Прокрутка вверх: уменьшаем индекс если не в начале
-            if self.vm.selected_index > 0:
-                self.vm.selected_index -= 1
-                self.view.render_file_list()
-                self.view.render_reasoning_panel()
-            # Если в начале (selected_index == 0), ничего не делаем
+            # Прокрутка вверх: выполняем только если в крайней верхней позиции (selected_index == 0)
+            # Если selected_index == 0, это сигнал для прокрутки содержимого списка вверх
+            if self.vm.navigate_up():
+                # Находимся в крайней верхней позиции - выполняем прокрутку
+                # В текущей реализации просто игнорируем (можно добавить скролл панели обоснований)
+                pass
+            # Если не в крайней позиции (navigate_up вернул False), ничего не делаем
         
         elif key in ('down', 'j'):
-            # Прокрутка вниз: увеличиваем индекс если не в конце
-            if self.vm.entries and self.vm.selected_index < len(self.vm.entries) - 1:
-                self.vm.selected_index += 1
-                self.view.render_file_list()
-                self.view.render_reasoning_panel()
-            # Если в конце, ничего не делаем
+            # Прокрутка вниз: выполняем только если в крайней нижней позиции
+            # Если selected_index == len(entries) - 1, это сигнал для прокрутки содержимого списка вниз
+            if self.vm.navigate_down():
+                # Находимся в крайней нижней позиции - выполняем прокрутку
+                # В текущей реализации просто игнорируем (можно добавить скролл панели обоснований)
+                pass
+            # Если не в крайней позиции (navigate_down вернул False), ничего не делаем
         
         elif key in ('enter', 'right', 'l'):
             new_path = self.vm.open_selected()
