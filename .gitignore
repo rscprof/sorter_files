@@ -1,39 +1,40 @@
-```
+```gitignore
 # Python
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
 
+# Compiled and build artifacts
+*.o
+*.obj
+*.out
+dist/
+build/
+target/
+
 # Dependencies
 .venv/
 venv/
-env/
 .env
 .env.local
 .env.*
 
-# Test coverage
-.coverage
-htmlcov/
-.coverage.*
-.nyc_output/
+# Logs and temp files
+*.log
+*.tmp
+*.swp
 
-# IDE
+# Editors
 .vscode/
 .idea/
-*.swp
-*.swo
 
-# Logs
-*.log
+# Coverage
+.coverage
+coverage/
+htmlcov/
 
-# Temp files
-*.tmp
-
-# Build artifacts
-dist/
-build/
-target/
-*.egg-info/
+# Testing
+.pytest_cache/
+.mypy_cache/
 ```
