@@ -1,44 +1,4 @@
 ```
-# Python
 __pycache__/
 *.pyc
-*.pyo
-*.pyd
-
-# Modules cache
-modules/__pycache__/
-
-# Dependencies
-.venv/
-venv/
-env/
-.env
-.env.local
-*.env.*
-
-# Logs
-*.log
-
-# Editor/IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-*.tmp
-
-# Build artifacts
-dist/
-build/
-*.egg-info/
-.coverage
-htmlcov/
-coverage/
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Testing
-.pytest_cache/
-.mypy_cache/
 ```

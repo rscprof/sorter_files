@@ -27,8 +27,7 @@ class LocalAIClient:
                  fallback_model: str = LOCALAI_FALLBACK_MODEL,
                  fallback_text_model: str = LOCALAI_FALLBACK_TEXT_MODEL,
                  max_consecutive_errors: int = 3,
-                 max_retries: int = 2,
-                 retry_delay: float = 1.0):
+                 max_retries: int = 2):
         self.base_url = base_url.rstrip("/")
         self.model = model  # мультимодальная (изображения)
         self.text_model = text_model  # только текст (быстрее)
@@ -40,8 +39,29 @@ class LocalAIClient:
         self.max_consecutive_errors = max_consecutive_errors
         self.consecutive_errors = 0  # счётчик подряд идущих ошибок
         self.max_retries = max_retries
-        self.retry_delay = retry_delay
         self._last_error_reason = None  # причина последней ошибки
+    
+    def _get_retry_delay(self, attempt: int) -> float:
+        """
+        Вычисляет задержку для повторной попытки с экспоненциальным ростом.
+        Последняя задержка (для max_retries) должна быть 10 минут (600 секунд).
+        
+        Формула: delay = base * (multiplier ^ attempt), где last_delay = 600s
+        Для max_retries=2: attempt=0 -> ~1.5s, attempt=1 -> ~15s, attempt=2 -> 600s
+        """
+        if self.max_retries == 0:
+            return 0.0
+        
+        # Последняя попытка (attempt == max_retries) должна иметь задержку 600 секунд
+        # Используем экспоненциальный рост: delay = base * (multiplier ^ attempt)
+        # Где multiplier ^ max_retries * base = 600
+        # Для плавного роста используем multiplier = 10, base = 600 / (10 ^ max_retries)
+        multiplier = 10.0
+        base_delay = 600.0 / (multiplier ** self.max_retries)
+        delay = base_delay * (multiplier ** attempt)
+        
+        # Округляем до целых для читаемости
+        return round(delay, 1)
 
     def _record_error(self, reason: str = ""):
         self.consecutive_errors += 1
@@ -121,8 +141,9 @@ class LocalAIClient:
             except Exception as e:
                 last_exception = e
                 if attempt < self.max_retries:
-                    logger.warning(f"[VL Model] Попытка {attempt+1} не удалась: {e}. Повтор через {self.retry_delay}s...")
-                    time.sleep(self.retry_delay)
+                    delay = self._get_retry_delay(attempt)
+                    logger.warning(f"[VL Model] Попытка {attempt+1} не удалась: {e}. Повтор через {delay}s...")
+                    time.sleep(delay)
                 else:
                     self._record_error(str(e))
                     print(f"[VL Model] Ошибка описания изображения после {self.max_retries+1} попыток: {e} (ошибок подряд: {self.consecutive_errors})")
@@ -182,24 +203,21 @@ class LocalAIClient:
                     result = resp.json()
                     content = result["choices"][0]["message"]["content"].strip()
 
-                    # Парсим JSON
-                    import re
-                    json_match = re.search(r"\{[\s\S]*\}", content)
-                    if json_match:
-                        data = json.loads(json_match.group())
-                        if DEBUG:
-                            print(f"DIR ANALYSIS RESULT: {json.dumps(data, indent=2, ensure_ascii=False)}")
-                        self._record_success()
-                        return data
-                    return {}
+                    # Парсим JSON с улучшенной устойчивостью
+                    data = self._parse_json_response(content)
+                    if DEBUG:
+                        print(f"DIR ANALYSIS RESULT: {json.dumps(data, indent=2, ensure_ascii=False)}")
+                    self._record_success()
+                    return data
                 except Exception as e:
                     last_exception = e
                     logger.warning(f"[Directory Analysis] Модель {model} не удалась: {e}")
                     continue
             
             if attempt < self.max_retries:
-                logger.warning(f"[Directory Analysis] Попытка {attempt+1} не удалась. Повтор через {self.retry_delay}s...")
-                time.sleep(self.retry_delay)
+                delay = self._get_retry_delay(attempt)
+                logger.warning(f"[Directory Analysis] Попытка {attempt+1} не удалась. Повтор через {delay}s...")
+                time.sleep(delay)
         
         self._record_error(str(last_exception))
         print(f"[Directory Analysis] Ошибка после {self.max_retries+1} попыток: {last_exception} (ошибок подряд: {self.consecutive_errors})")
@@ -350,8 +368,9 @@ class LocalAIClient:
             except requests.exceptions.Timeout as e:
                 last_exception = e
                 if attempt < self.max_retries:
-                    logger.warning(f"[LocalAI] Таймаут транскрипции {filepath}, попытка {attempt+1}. Повтор через {self.retry_delay}s...")
-                    time.sleep(self.retry_delay)
+                    delay = self._get_retry_delay(attempt)
+                    logger.warning(f"[LocalAI] Таймаут транскрипции {filepath}, попытка {attempt+1}. Повтор через {delay}s...")
+                    time.sleep(delay)
                 else:
                     self._record_error("Timeout")
                     print(f"[LocalAI] Таймаут транскрипции {filepath} после {self.max_retries+1} попыток (ошибок подряд: {self.consecutive_errors})")
@@ -359,8 +378,9 @@ class LocalAIClient:
             except Exception as e:
                 last_exception = e
                 if attempt < self.max_retries:
-                    logger.warning(f"[LocalAI] Ошибка транскрипции {filepath}, попытка {attempt+1}: {e}. Повтор через {self.retry_delay}s...")
-                    time.sleep(self.retry_delay)
+                    delay = self._get_retry_delay(attempt)
+                    logger.warning(f"[LocalAI] Ошибка транскрипции {filepath}, попытка {attempt+1}: {e}. Повтор через {delay}s...")
+                    time.sleep(delay)
                 else:
                     self._record_error(str(e))
                     print(f"[LocalAI] Ошибка транскрипции {filepath} после {self.max_retries+1} попыток: {e} (ошибок подряд: {self.consecutive_errors})")
@@ -427,13 +447,129 @@ class LocalAIClient:
         ]
 
     def _parse_json_response(self, content: str) -> dict:
-        json_match = re.search(r"\{[\s\S]*\}", content)
-        if json_match:
-            try:
-                return json.loads(json_match.group())
-            except json.JSONDecodeError:
-                pass
-        return {"category": "неразобранное", "reasoning": f"Не удалось распарсить ответ: {content[:200]}"}
+        """
+        Парсит JSON из ответа LLM с повышенной устойчивостью к некорректному формату.
+        
+        Стратегии:
+        1. Поиск JSON между { и } с помощью regex (сначала жадный, потом не-жадный)
+        2. Попытка исправить распространённые ошибки (лишние запятые, незакрытые кавычки)
+        3. Извлечение частичных данных даже при неполном JSON
+        """
+        if not content or not isinstance(content, str):
+            return {"category": "неразобранное", "reasoning": "Пустой или некорректный ответ"}
+        
+        # Стратегия 1: Поиск всех потенциальных JSON-объектов
+        # Сначала жадный поиск (от первого { до последнего })
+        json_patterns = [
+            r'\{[\s\S]*\}',   # Жадный поиск - приоритет 1
+            r'\{[\s\S]*?\}',  # Не-жадный поиск - приоритет 2
+        ]
+        
+        for pattern in json_patterns:
+            matches = re.findall(pattern, content)
+            # Сортируем по длине - сначала пробуем более длинные совпадения
+            matches.sort(key=len, reverse=True)
+            for match in matches:
+                # Пробуем распарсить как есть
+                try:
+                    return json.loads(match)
+                except json.JSONDecodeError:
+                    pass
+                
+                # Стратегия 2: Исправление распространённых ошибок JSON
+                fixed_match = self._fix_common_json_errors(match)
+                try:
+                    return json.loads(fixed_match)
+                except json.JSONDecodeError:
+                    pass
+        
+        # Стратегия 3: Поиск по ключевым полям и сборка объекта вручную
+        parsed = self._extract_fields_manually(content)
+        if parsed:
+            return parsed
+        
+        return {"category": "неразобранное", "reasoning": f"Не удалось распарсить ответ: {content[:300]}"}
+    
+    def _fix_common_json_errors(self, json_str: str) -> str:
+        """
+        Исправляет распространённые ошибки в JSON:
+        - Лишние запятые перед закрывающими скобками
+        - Незакрытые кавычки
+        - Одинарные кавычки вместо двойных
+        - Отсутствующие закрывающие скобки
+        """
+        import re
+        
+        result = json_str
+        
+        # 1. Удаляем trailing commas перед } или ]
+        result = re.sub(r',(\s*[}\]])', r'\1', result)
+        
+        # 2. Добавляем недостающие закрывающие скобки
+        open_braces = result.count('{')
+        close_braces = result.count('}')
+        open_brackets = result.count('[')
+        close_brackets = result.count(']')
+        
+        if close_braces < open_braces:
+            result += '}' * (open_braces - close_braces)
+        if close_brackets < open_brackets:
+            result += ']' * (open_brackets - close_brackets)
+        
+        return result
+    
+    def _extract_fields_manually(self, content: str) -> Optional[dict]:
+        """
+        Пытается извлечь известные поля из ответа вручную, если JSON не парсится.
+        """
+        fields_to_extract = [
+            'category', 'subcategory', 'suggested_name', 'description',
+            'is_distributable', 'is_project', 'project_type', 'project_name',
+            'files_to_delete', 'important_files', 'related_keywords', 'reasoning'
+        ]
+        
+        extracted = {}
+        
+        for field in fields_to_extract:
+            # Паттерн для поиска "field": "value" или "field": [...]
+            patterns = [
+                rf'"{field}"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"',  # Строковое значение в JSON
+                rf'"{field}"\s*:\s*(true|false)',  # Булево значение в JSON
+                rf'"{field}"\s*:\s*\[([\s\S]*?)\]',  # Массив в JSON
+                rf'"{field}"\s*:\s*(-?\d+(?:\.\d+)?)',  # Числовое значение в JSON
+                # Паттерны для свободного текста (без JSON-формата)
+                rf'(?:^|[\s,.]){field}\s*[=:]\s*"([^"]+)"',  # field = "value" или field: "value"
+                rf'(?:^|[\s,.]){field}\s*[=:]\s*([A-Za-zА-Яа-я][A-Za-zА-Яа-я\s\-_]*?)(?:\.|,|$|\n)',  # field = value (до точки/запятой, с поддержкой кириллицы)
+            ]
+            
+            for pattern in patterns:
+                match = re.search(pattern, content, re.IGNORECASE | re.UNICODE)
+                if match:
+                    value = match.group(1)
+                    
+                    # Обработка массивов
+                    if field in ['files_to_delete', 'important_files', 'related_keywords']:
+                        # Пытаемся распарсить элементы массива
+                        items = re.findall(r'"([^"]*)"', match.group(0))
+                        if items:
+                            extracted[field] = items
+                            break
+                    
+                    # Обработка булевых значений
+                    elif field == 'is_distributable' or field == 'is_project':
+                        extracted[field] = value.lower() == 'true'
+                        break
+                    
+                    # Строковые значения
+                    else:
+                        extracted[field] = value.strip()
+                        break
+        
+        # Возвращаем только если нашли хотя бы одно поле
+        if extracted:
+            return extracted
+        
+        return None
 
 
 class SearXNGClient:
