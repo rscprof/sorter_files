@@ -53,10 +53,13 @@ DEFAULTS: dict[str, Any] = {
     "project_indicators": [
         "package.json", "requirements.txt", "setup.py", "pyproject.toml",
         "CMakeLists.txt", "Makefile", "Cargo.toml", "go.mod",
-        "build.gradle", "pom.xml", ".git", ".gitignore", "Dockerfile",
+        "build.gradle", "build.gradle.kts", "pom.xml", ".git", ".gitignore", "Dockerfile",
         "composer.json", "composer.lock",
         "src/", "include/", "lib/", "main.cpp", "main.c", "main.py",
         "index.php",
+        # Android project indicators
+        "AndroidManifest.xml", "local.properties", "gradle.properties",
+        "settings.gradle", "settings.gradle.kts", ".idea/", ".iml",
         # Database indicators
         "ibdata1", "ib_logfile0", "ib_logfile1", "mysql-bin.index",
         "postmaster.pid", "postmaster.opts", "pg_hba.conf", "pg_ident.conf",
@@ -73,6 +76,8 @@ DEFAULTS: dict[str, Any] = {
         "py": ["__pycache__", "*.pyc", "*.pyo", ".pytest_cache", ".mypy_cache", "*.egg-info", "dist/", "build/", "*.egg"],
         "js": ["node_modules/", "dist/", "build/", ".next/", "out/", ".turbo/", "*.min.js", "*.min.js.map"],
         "java": ["target/", "build/", "out/", "*.class", "*.jar", "*.war", "*.ear", ".gradle/"],
+        "kotlin": ["build/", "out/", "*.class", "*.jar", "*.war", "*.ear", ".gradle/"],
+        "android": ["build/", ".gradle/", "app/build/", "*.apk", "*.aab", "*.dex", "R.class", "BuildConfig.class"],
         "c": ["build/", "cmake-build-debug/", "CMakeFiles/", "*.o", "*.so", "*.a", "*.exe", "*.deb"],
         "cs": ["bin/", "obj/", "*.dll", "*.exe", "*.pdb", ".vs/"],
         "go": ["vendor/", "*.exe", "dist/"],

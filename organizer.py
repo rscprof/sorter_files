@@ -687,11 +687,23 @@ class FileOrganizer:
         # Создаём целевой каталог
         os.makedirs(project_target, exist_ok=True)
 
-        # Копируем файлы, исключая файлы на удаление
+        # Копируем файлы, исключая build-артефакты и служебные директории
         import shutil as sh
         copied = 0
         deleted = 0
+        
+        # Стандартные директории и файлы которые не копируем (build-артефакты, IDE кэш)
+        exclude_dirs = {".gradle", "build", ".idea", ".vs", "bin", "obj", "target", 
+                        "__pycache__", "node_modules", "vendor", ".git", "out",
+                        "cmake-build-debug", "CMakeFiles"}
+        exclude_file_patterns = {"*.class", "*.jar", "*.war", "*.ear", "*.apk", "*.aab", 
+                                 "*.dex", "*.iml", "*.pyc", "*.pyo", "*.so", "*.dll", 
+                                 "*.exe", "*.o", "*.a", "*.min.js"}
+        
         for root, dirs, files in os.walk(dirpath):
+            # Исключаем ненужные директории из обхода
+            dirs[:] = [d for d in dirs if d not in exclude_dirs]
+            
             rel_root = os.path.relpath(root, dirpath)
             target_root = os.path.join(project_target, rel_root) if rel_root != "." else project_target
             os.makedirs(target_root, exist_ok=True)
@@ -700,13 +712,18 @@ class FileOrganizer:
                 src = os.path.join(root, fn)
                 rel_path = os.path.relpath(src, dirpath)
 
-                # Проверяем надо ли удалять
+                # Проверяем надо ли удалять (явный список от AI)
                 should_del = any(
                     del_pattern in rel_path or del_pattern == fn
                     for del_pattern in files_to_delete
                 )
+                
+                # Проверяем является ли файл build-артефактом
+                if not should_del:
+                    should_del = is_build_artifact(src, dirpath)
+                
                 if should_del:
-                    logger.info(f"  │ 🗑  {rel_path} → на удаление")
+                    logger.info(f"  │ 🗑  {rel_path} → на удаление (build-артефакт)")
                     deleted += 1
                     continue
 

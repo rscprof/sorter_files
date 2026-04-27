@@ -91,7 +91,7 @@ def is_build_artifact(filepath: str, project_root: str = "") -> bool:
         for pattern in patterns:
             if pattern.endswith("/"):
                 dir_name = pattern.rstrip("/")
-                if f"/{dir_name}/" in f"/{rel}" or rel.startswith(f"{dir_name}/"):
+                if f"/{dir_name}/" in f"/{rel}" or rel.startswith(f"{dir_name}/") or f"/.{dir_name}/" in f"/{rel}":
                     return True
             elif pattern.startswith("*"):
                 if fnmatch.fnmatch(name_lower, pattern.lower()):
@@ -106,6 +106,10 @@ def is_build_artifact(filepath: str, project_root: str = "") -> bool:
                        "__pycache__", ".min.", ".bundle."):
         if indicator in rel:
             return True
+    
+    # Проверка скрытых директорий IDE и build-систем в начале пути
+    if rel.startswith(".gradle/") or rel.startswith(".idea/"):
+        return True
 
     return False
 
