@@ -59,7 +59,9 @@ def extract_text(filepath: str) -> str:
         if ext in ("txt", "md", "csv", "json", "yaml", "yml", "xml", "log",
                     "cfg", "ini", "conf", "py", "js", "ts", "java", "c", "cpp",
                     "h", "cs", "go", "rs", "sh", "bat", "ps1", "sql", "gpx",
-                    "opml", "vcf", "ics", "toml"):
+                    "opml", "vcf", "ics", "toml", "php",
+                    # Database raw files - read as binary signature only
+                    "myd", "myi", "frm", "ibd"):
             with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
                 return f.read()[:5000]
 

@@ -10,7 +10,9 @@ Priority order:
   40 — audio              (аудио: whisper → AI)
   50 — pdf_scans          (PDF-сканы: конвертация → OCR → AI)
   60 — images             (изображения: EXIF → JPEG → AI)
-  70 — documents          (документы с текстом: AI)
+  65 — php                (PHP-файлы: проекты vs скрипты)
+  70 — database           (SQL/DB файлы: дампы, миграции, проекты БД)
+  75 — documents          (документы с текстом: AI)
   999 — fallback          (всё остальное: по расширению)
 """
 
@@ -23,6 +25,8 @@ from modules.video import VideoAnalyzer
 from modules.pdf_scans import PdfScansAnalyzer
 from modules.djvu import DjvuAnalyzer
 from modules.images import ImagesAnalyzer
+from modules.php import PhpAnalyzer
+from modules.database import DatabaseAnalyzer
 from modules.documents import DocumentsAnalyzer
 from modules.fb2 import Fb2Analyzer
 from modules.rtf import RtfAnalyzer
@@ -39,9 +43,11 @@ ANALYZERS: list[type[BaseAnalyzer]] = sorted(
         PdfScansAnalyzer,           # 50
         DjvuAnalyzer,               # 49
         ImagesAnalyzer,             # 60
-        DocumentsAnalyzer,          # 70
-        Fb2Analyzer,                # 71
-        RtfAnalyzer,                # 72
+        PhpAnalyzer,                # 65
+        DatabaseAnalyzer,           # 70
+        DocumentsAnalyzer,          # 75
+        Fb2Analyzer,                # 76
+        RtfAnalyzer,                # 77
         FallbackAnalyzer,           # 999
     ],
     key=lambda cls: cls().priority,
