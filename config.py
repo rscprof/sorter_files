@@ -54,7 +54,14 @@ DEFAULTS: dict[str, Any] = {
         "package.json", "requirements.txt", "setup.py", "pyproject.toml",
         "CMakeLists.txt", "Makefile", "Cargo.toml", "go.mod",
         "build.gradle", "pom.xml", ".git", ".gitignore", "Dockerfile",
+        "composer.json", "composer.lock",
         "src/", "include/", "lib/", "main.cpp", "main.c", "main.py",
+        "index.php",
+        # Database indicators
+        "ibdata1", "ib_logfile0", "ib_logfile1", "mysql-bin.index",
+        "postmaster.pid", "postmaster.opts", "pg_hba.conf", "pg_ident.conf",
+        # Distributable indicators
+        "setup.exe", "install.exe", "installer.exe", "autorun.inf",
     ],
 
     "project_exclude_dirs": [

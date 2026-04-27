@@ -17,7 +17,7 @@ class DocumentsAnalyzer(BaseAnalyzer):
 
     @property
     def priority(self) -> int:
-        return 70
+        return 75
 
     @property
     def name(self) -> str:

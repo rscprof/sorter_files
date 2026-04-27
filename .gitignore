@@ -1,4 +1,39 @@
 ```
+# Python
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+
+# Dependencies
+.venv/
+venv/
+env/
+.env
+.env.local
+.env.*
+
+# Test coverage
+.coverage
+htmlcov/
+.coverage.*
+.nyc_output/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+
+# Temp files
+*.tmp
+
+# Build artifacts
+dist/
+build/
+target/
+*.egg-info/
 ```
