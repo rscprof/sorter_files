@@ -869,6 +869,9 @@ class FileOrganizer:
         self._load_existing_categories()
         self._scan_existing_categories()
 
+        # 2.3. Нормализация категорий (в начале запуска)
+        self._normalize_categories()
+
         # 2.5. Построить индекс хешей для дубликатов
         self._hash_index: dict[str, str] = {}
         self._build_hash_index()
@@ -916,6 +919,9 @@ class FileOrganizer:
 
                 self._record_stats(ext, "ok")
                 processed_count += 1
+
+                # Проверяем необходимость нормализации после каждых 100 новых подкатегорий
+                self._check_normalization_trigger()
 
             except Exception as e:
                 logger.error(f"  ✗ Ошибка: {e}")
@@ -1023,6 +1029,244 @@ class FileOrganizer:
             else:
                 lines.append(f"  - {cat}")
         return "\n".join(lines)
+
+    def _get_categories_with_counts(self) -> dict:
+        """Собрать статистику по категориям и подкатегориям с количеством файлов."""
+        from pathlib import Path
+        
+        cats_stats = {}  # category -> {"count": int, "subcategories": {subcat: count}}
+        
+        if not self.target.exists():
+            return cats_stats
+        
+        for root, dirs, files in os.walk(self.target):
+            rel = os.path.relpath(root, self.target)
+            # Пропускаем служебные каталоги
+            if rel.startswith("_"):
+                dirs.clear()
+                continue
+            
+            parts = Path(rel).parts
+            if len(parts) >= 1 and parts[0] and not parts[0].startswith("_"):
+                cat = parts[0]
+                subcat = parts[1] if len(parts) >= 2 else None
+                
+                if cat not in cats_stats:
+                    cats_stats[cat] = {"count": 0, "subcategories": {}}
+                
+                # Считаем файлы в текущей директории
+                file_count = len([f for f in files if not f.startswith(".")])
+                cats_stats[cat]["count"] += file_count
+                
+                if subcat:
+                    if subcat not in cats_stats[cat]["subcategories"]:
+                        cats_stats[cat]["subcategories"][subcat] = 0
+                    cats_stats[cat]["subcategories"][subcat] += file_count
+            
+            dirs[:] = [d for d in dirs if not d.startswith("_")]
+        
+        return cats_stats
+
+    def _normalize_categories(self, processed_since_last_check: int = 0):
+        """Проверить и выполнить нормализацию категорий через ИИ.
+        
+        Вызывается после каждых 100 новых подкатегорий или в начале запуска.
+        """
+        # Проверяем нужно ли запускать нормализацию
+        total_subcats = sum(len(subs) for subs in self.state.categories.values())
+        
+        # Нормализация нужна если:
+        # 1. Это начало запуска (processed_since_last_check == 0 и total_subcats > 0)
+        # 2. Или добавлено 100+ новых подкатегорий с последней проверки
+        should_normalize = False
+        
+        if hasattr(self, '_last_normalization_subcat_count'):
+            new_subcats = total_subcats - self._last_normalization_subcat_count
+            if new_subcats >= 100:
+                should_normalize = True
+                logger.info(f"📊 Добавлено {new_subcats} новых подкатегорий — запускаю нормализацию...")
+        elif total_subcats > 0:
+            # Первый запуск с существующими категориями
+            should_normalize = True
+            logger.info(f"📊 Найдено {total_subcats} подкатегорий — запускаю начальную нормализацию...")
+        
+        if not should_normalize:
+            return
+        
+        # Собираем статистику по категориям
+        cats_stats = self._get_categories_with_counts()
+        if not cats_stats:
+            logger.info("  ⏭ Нет категорий для нормализации")
+            return
+        
+        # Формируем запрос к ИИ
+        cats_list = []
+        for cat in sorted(cats_stats.keys()):
+            data = cats_stats[cat]
+            cat_count = data["count"]
+            subs = data["subcategories"]
+            
+            cats_list.append(f"- {cat} (всего файлов: {cat_count})")
+            for subcat in sorted(subs.keys()):
+                cats_list.append(f"    • {subcat}: {subs[subcat]} файлов")
+        
+        cats_text = "\n".join(cats_list)
+        
+        prompt = f"""Проанализируй список категорий и подкатегорий архива и предложи какие из них можно объединить.
+
+Список категорий (с количеством файлов):
+{cats_text}
+
+Ответь в формате JSON:
+{{
+  "merges": [
+    {{
+      "source_categories": ["Категория1", "Категория2"],
+      "source_subcategories": [["подкат1", "подкат2"], ["подкат3"]],
+      "target_category": "Новое название категории",
+      "target_subcategory": "Новое название подкатегории или null",
+      "reason": "Причина объединения"
+    }}
+  ]
+}}
+
+Правила:
+1. Объединяй категории/подкатегории с похожей тематикой
+2. Предлагай понятные общие названия для объединённых категорий
+3. Если target_subcategory = null, файлы будут в корне категории
+4. Не объединяй всё подряд — только действительно похожие категории
+5. Учитывай что перемещение файлов должно быть логичным
+
+Отвечай ТОЛЬКО валидным JSON."""
+
+        try:
+            result = self.localai.analyze_content(text_content=prompt)
+            if not result or "merges" not in result:
+                logger.info("  ⚠ ИИ не предложил вариантов объединения")
+                return
+            
+            merges = result.get("merges", [])
+            if not merges:
+                logger.info("  ✓ Категории в порядке, объединений не требуется")
+                return
+            
+            logger.info(f"  🤖 ИИ предложил {len(merges)} вариантов объединения:")
+            for merge in merges:
+                src_cats = merge.get("source_categories", [])
+                target_cat = merge.get("target_category", "")
+                reason = merge.get("reason", "")
+                logger.info(f"     {' + '.join(src_cats)} → {target_cat} ({reason})")
+            
+            # Выполняем слияния
+            self._execute_category_merges(merges)
+            
+        except Exception as e:
+            logger.error(f"  ❌ Ошибка нормализации категорий: {e}")
+        
+        # Обновляем счётчик
+        self._last_normalization_subcat_count = total_subcats
+
+    def _check_normalization_trigger(self):
+        """Проверить, добавлено ли 100+ новых подкатегорий и запустить нормализацию."""
+        total_subcats = sum(len(subs) for subs in self.state.categories.values())
+        
+        if hasattr(self, '_last_normalization_subcat_count'):
+            new_subcats = total_subcats - self._last_normalization_subcat_count
+            if new_subcats >= 100:
+                logger.info(f"📊 Добавлено {new_subcats} новых подкатегорий — запускаю нормализацию...")
+                self._normalize_categories()
+
+    def _execute_category_merges(self, merges: list):
+        """Выполнить слияние категорий согласно рекомендациям ИИ."""
+        import shutil
+        
+        for merge in merges:
+            source_categories = merge.get("source_categories", [])
+            source_subcategories = merge.get("source_subcategories", [[]])
+            target_category = merge.get("target_category", "")
+            target_subcategory = merge.get("target_subcategory")
+            
+            if not source_categories or not target_category:
+                continue
+            
+            logger.info(f"  🔀 Объединение: {' + '.join(source_categories)} → {target_category}")
+            
+            # Обрабатываем каждую исходную категорию
+            for i, src_cat in enumerate(source_categories):
+                src_cat_path = os.path.join(self.target, src_cat)
+                if not os.path.exists(src_cat_path):
+                    logger.info(f"     ⏭ Категория '{src_cat}' не найдена, пропускаю")
+                    continue
+                
+                # Определяем подкатегории для этой категории
+                src_subcats = source_subcategories[i] if i < len(source_subcategories) else []
+                
+                # Если подкатегории не указаны — берём все
+                if not src_subcats:
+                    src_subcats = list(self.existing_subcategories.get(src_cat, set()))
+                
+                # Путь к целевой категории
+                target_cat_path = os.path.join(self.target, target_category)
+                
+                for src_subcat in src_subcats:
+                    src_subcat_path = os.path.join(src_cat_path, src_subcat)
+                    if not os.path.exists(src_subcat_path):
+                        logger.info(f"     ⏭ Подкатегория '{src_cat}/{src_subcat}' не найдена")
+                        continue
+                    
+                    # Определяем целевую подкатегорию
+                    if target_subcategory:
+                        target_subcat_path = os.path.join(target_cat_path, target_subcategory)
+                    else:
+                        # Файлы будут в корне категории
+                        target_subcat_path = target_cat_path
+                    
+                    # Создаём целевую директорию
+                    os.makedirs(target_subcat_path, exist_ok=True)
+                    
+                    # Перемещаем файлы с обработкой коллизий
+                    moved = 0
+                    for item in os.listdir(src_subcat_path):
+                        src_item = os.path.join(src_subcat_path, item)
+                        
+                        # Определяем целевое имя с обработкой коллизий
+                        target_item = os.path.join(target_subcat_path, item)
+                        
+                        if os.path.exists(target_item):
+                            # Коллизия — переименовываем
+                            stem = Path(item).stem
+                            ext = Path(item).suffix
+                            counter = 1
+                            while os.path.exists(target_item):
+                                target_item = os.path.join(target_subcat_path, f"{stem}_{counter}{ext}")
+                                counter += 1
+                            logger.info(f"        ⚠️ Коллизия: {item} → {Path(target_item).name}")
+                        
+                        try:
+                            shutil.move(src_item, target_item)
+                            moved += 1
+                        except Exception as e:
+                            logger.error(f"        ❌ Ошибка перемещения {item}: {e}")
+                    
+                    logger.info(f"     ✅ Перемещено {moved} файлов из '{src_cat}/{src_subcat}'")
+                
+                # Удаляем пустую исходную категорию
+                try:
+                    if not os.listdir(src_cat_path):
+                        os.rmdir(src_cat_path)
+                        logger.info(f"     🗑 Удалена пустая категория '{src_cat}'")
+                    else:
+                        # Проверяем остались ли подкатегории
+                        remaining = [d for d in os.listdir(src_cat_path) 
+                                   if os.path.isdir(os.path.join(src_cat_path, d))]
+                        if not remaining:
+                            # Остались только файлы в корне — тоже удаляем если нужно
+                            pass
+                except Exception as e:
+                    logger.error(f"     ⚠ Не удалось удалить '{src_cat}': {e}")
+            
+            # Обновляем состояние категорий
+            self._scan_existing_categories()
 
     def _save_report(self):
         """Сохранить отчёт.
