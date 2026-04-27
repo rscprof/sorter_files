@@ -47,6 +47,7 @@ class FileBrowserViewModel:
         self.history: List[str] = []
         self.entries: List[FileEntry] = []
         self.selected_index = 0
+        self.top_index = 0
     
     def load_directory(self, path: Optional[str] = None) -> None:
         if path is not None:
@@ -90,9 +91,48 @@ class FileBrowserViewModel:
             return True
         return False
     
+    def navigate_up(self, viewport_height: int = 10) -> bool:
+        """Навигация вверх с поддержкой прокрутки.
+        
+        Возвращает True если была прокрутка (достигнут край), False иначе.
+        """
+        if self.selected_index > 0:
+            self.selected_index -= 1
+            # Если selected_index ушёл за верхнюю границу видимости
+            if self.selected_index < self.top_index:
+                self.top_index = self.selected_index
+            return False
+        # Достигли верха - сигнал для прокрутки
+        if self.top_index > 0:
+            self.top_index -= 1
+            return True
+        return False
+    
     def move_down(self) -> bool:
         if self.entries and self.selected_index < len(self.entries) - 1:
             self.selected_index += 1
+            return True
+        return False
+    
+    def navigate_down(self, viewport_height: int = 10) -> bool:
+        """Навигация вниз с поддержкой прокрутки.
+        
+        Возвращает True если была прокрутка (достигнут край), False иначе.
+        """
+        if not self.entries:
+            return False
+        
+        max_index = len(self.entries) - 1
+        if self.selected_index < max_index:
+            self.selected_index += 1
+            # Если selected_index ушёл за нижнюю границу видимости
+            if self.selected_index >= self.top_index + viewport_height:
+                self.top_index = self.selected_index - viewport_height + 1
+            return False
+        # Достигли низа - проверяем возможность прокрутки
+        # Прокрутка возможна только если список больше viewport
+        if len(self.entries) > viewport_height and self.top_index < len(self.entries) - viewport_height:
+            self.top_index += 1
             return True
         return False
     
@@ -242,13 +282,37 @@ class FileBrowserView:
         self.file_walker.clear()
         
         entries_data = self.vm.get_entries_for_display()
-        for display_name, base_style, focus_style in entries_data:
-            # wrap='clip' гарантирует строго 1 строку на элемент, 
-            # что критично для точного расчёта offset_rows
+        
+        # Определяем диапазон видимых элементов
+        viewport = self.viewport_height if self.viewport_height > 0 else 20
+        start_idx = self.vm.top_index
+        end_idx = min(start_idx + viewport, len(entries_data))
+        
+        # Добавляем placeholder'ы до видимой области
+        for i in range(start_idx):
+            widget = urwid.AttrMap(
+                urwid.Text("", wrap='clip'),
+                'file',
+                'file_focus'
+            )
+            self.file_walker.append(widget)
+        
+        # Добавляем видимые элементы
+        for i in range(start_idx, end_idx):
+            display_name, base_style, focus_style = entries_data[i]
             widget = urwid.AttrMap(
                 urwid.Text(display_name, wrap='clip'),
                 base_style,
                 focus_style
+            )
+            self.file_walker.append(widget)
+        
+        # Добавляем placeholder'ы после видимой области
+        for i in range(end_idx, len(entries_data)):
+            widget = urwid.AttrMap(
+                urwid.Text("", wrap='clip'),
+                'file',
+                'file_focus'
             )
             self.file_walker.append(widget)
         
@@ -257,13 +321,17 @@ class FileBrowserView:
         
         idx = max(0, min(self.vm.selected_index, len(self.vm.entries) - 1))
         self.file_listbox.focus_position = idx
-        
-        # 📜 Точная построчная прокрутка у краёв экрана
-        if self.viewport_height > 0:
-            # Если курсор ушёл за нижнюю границу -> прокрутить ровно на 1 вниз
-            # Если курсор ушёл за верхнюю границу -> прокрутить ровно на 1 вверх
-            target_offset = max(0, idx - self.viewport_height + 1)
-            self.file_listbox.offset_rows = target_offset
+        self.file_listbox.offset_rows = 0
+    
+    @property
+    def viewport_height(self) -> int:
+        """Возвращает высоту области просмотра."""
+        return self._viewport_height if hasattr(self, '_viewport_height') and self._viewport_height > 0 else 20
+    
+    @viewport_height.setter
+    def viewport_height(self, value: int) -> None:
+        """Устанавливает высоту области просмотра."""
+        self._viewport_height = value
     
     def render_reasoning_panel(self) -> None:
         self.reasoning_walker.clear()
