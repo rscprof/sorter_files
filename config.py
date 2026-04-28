@@ -62,8 +62,10 @@ DEFAULTS: dict[str, Any] = {
         # Android project indicators
         "AndroidManifest.xml", "local.properties", "gradle.properties",
         "settings.gradle", "settings.gradle.kts", ".idea/", ".iml",
-        # Visual Studio
+        # Visual Studio / .NET
         "*.sln", "*.vcxproj", "*.vcxproj.filters",
+        "*.csproj", "*.vbproj", "*.fsproj",
+        "*.suo", "*.user",
         # Database indicators
         "ibdata1", "ib_logfile0", "ib_logfile1", "mysql-bin.index",
         "postmaster.pid", "postmaster.opts", "pg_hba.conf", "pg_ident.conf",
@@ -83,7 +85,7 @@ DEFAULTS: dict[str, Any] = {
         "kotlin": ["build/", "out/", "*.class", "*.jar", "*.war", "*.ear", ".gradle/"],
         "android": ["build/", ".gradle/", "app/build/", "*.apk", "*.aab", "*.dex", "R.class", "BuildConfig.class"],
         "c": ["build/", "cmake-build-debug/", "CMakeFiles/", "*.o", "*.so", "*.a", "*.exe", "*.deb"],
-        "cs": ["bin/", "obj/", "*.dll", "*.exe", "*.pdb", ".vs/"],
+        "cs": ["bin/", "obj/", "*.dll", "*.exe", "*.pdb", ".vs/", "*.ilk", "*.tlog", "*.lastbuildstate"],
         "go": ["vendor/", "*.exe", "dist/"],
         "rs": ["target/", "Cargo.lock"],
         "web": [".svelte-kit/", ".angular/", "coverage/", "dist/", "build/"],
