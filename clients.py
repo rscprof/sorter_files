@@ -35,7 +35,7 @@ class LocalAIClient:
         self.fallback_model = fallback_model  # резервная мультимодальная
         self.fallback_text_model = fallback_text_model  # резервная текстовая
         self.session = requests.Session()
-        self.session.timeout = 180
+        self.session.timeout = 600
         self.max_consecutive_errors = max_consecutive_errors
         self.consecutive_errors = 0  # счётчик подряд идущих ошибок
         self.max_retries = max_retries
@@ -157,7 +157,7 @@ class LocalAIClient:
                         "temperature": 0.1,
                         "max_tokens": 1024,
                     },
-                    timeout=120,
+                    timeout=600,
                 )
                 resp.raise_for_status()
                 result = resp.json()
@@ -230,7 +230,7 @@ class LocalAIClient:
                             "temperature": 0.1,
                             "max_tokens": 1024,
                         },
-                        timeout=120,
+                        timeout=600,
                     )
                     resp.raise_for_status()
                     result = resp.json()
@@ -392,7 +392,7 @@ class LocalAIClient:
                         f"{self.base_url}/audio/transcriptions",
                         files=files,
                         data=data,
-                        timeout=300,
+                        timeout=600,
                     )
                     resp.raise_for_status()
                     result = resp.json()
