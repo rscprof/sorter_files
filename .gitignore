@@ -1,15 +1,5 @@
 ```
 __pycache__/
 *.pyc
-
-# Log files
-*.log
-logs/
-
-# Local config
-config.local.json
-
-# IDE
-.idea/
-*.iml
+.pytest_cache/
 ```

@@ -81,9 +81,9 @@ def is_build_artifact(filepath: str, project_root: str = "") -> bool:
         try:
             rel = str(p.relative_to(project_root)).lower()
         except ValueError:
-            rel = p.name.lower()
+            rel = str(p).lower()
     else:
-        rel = p.name.lower()
+        rel = str(p).lower()
 
     name_lower = p.name.lower()
 
@@ -108,7 +108,7 @@ def is_build_artifact(filepath: str, project_root: str = "") -> bool:
             return True
     
     # Проверка скрытых директорий IDE и build-систем в начале пути
-    if rel.startswith(".gradle/") or rel.startswith(".idea/"):
+    if rel.startswith(".gradle/") or rel.startswith(".idea/") or rel.startswith(".vs/"):
         return True
 
     return False
