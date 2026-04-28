@@ -19,6 +19,7 @@ from typing import Optional
 
 from modules.base import BaseAnalyzer
 from models import FileInfo
+from config import ANALYSIS_VIDEO_TRANSCRIBE_SECONDS
 
 logger = logging.getLogger(__name__)
 
@@ -114,10 +115,10 @@ class VideoAnalyzer(BaseAnalyzer):
                     info.ai_description = f"Видео {' '.join(meta_parts)}. Кадры: {frame_desc[:200]}"
                     return info
 
-        # 4. Речь (Whisper, первые 60 сек) → Mini-модель
+        # 4. Речь (Whisper, первые N сек) → Mini-модель
         if has_audio and duration > 5:
-            logger.info(f"  → Транскрипция аудио (первые 60с, whisperx-tiny)...")
-            transcript = self._transcribe_audio(filepath, localai, duration=60)
+            logger.info(f"  → Транскрипция аудио (первые {ANALYSIS_VIDEO_TRANSCRIBE_SECONDS}с, whisperx-tiny)...")
+            transcript = self._transcribe_audio(filepath, localai, duration=ANALYSIS_VIDEO_TRANSCRIBE_SECONDS)
             if transcript and len(transcript) > 30:
                 logger.info(f"  ← Транскрипт: {len(transcript)} символов")
                 ai_result_audio = localai.analyze_content(

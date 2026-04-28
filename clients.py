@@ -11,7 +11,7 @@ from typing import Optional
 
 import requests
 
-from config import LOCALAI_URL, LOCALAI_MODEL, LOCALAI_TEXT_MODEL, LOCALAI_VL_MODEL, SEARXNG_URL, LOCALAI_FALLBACK_MODEL, LOCALAI_FALLBACK_TEXT_MODEL
+from config import LOCALAI_URL, LOCALAI_MODEL, LOCALAI_TEXT_MODEL, LOCALAI_VL_MODEL, SEARXNG_URL, LOCALAI_FALLBACK_MODEL, LOCALAI_FALLBACK_TEXT_MODEL, ANALYSIS_VL_MAX_PIXELS
 
 logger = logging.getLogger(__name__)
 DEBUG = os.getenv("DEBUG", "").lower() in ("1", "true", "yes")
@@ -72,6 +72,39 @@ class LocalAIClient:
         self.consecutive_errors = 0
         self._last_error_reason = None
 
+    def _prepare_image_for_vl(self, image_path: str) -> tuple[bytes, str]:
+        """Уменьшить изображение если оно слишком большое для VL-модели."""
+        import tempfile
+        import struct
+        try:
+            from PIL import Image
+            with Image.open(image_path) as img:
+                w, h = img.size
+                max_pixels = ANALYSIS_VL_MAX_PIXELS
+                if w * h <= max_pixels * max_pixels:
+                    with open(image_path, "rb") as f:
+                        return f.read(), "jpeg"
+                
+                ratio = min(max_pixels / w, max_pixels / h)
+                new_w = int(w * ratio)
+                new_h = int(h * ratio)
+                resized = img.resize((new_w, new_h), Image.LANCZOS)
+                
+                tmp = tempfile.NamedTemporaryFile(suffix=".jpg", delete=False)
+                resized.save(tmp.name, "JPEG", quality=85, optimize=True)
+                tmp.close()
+                
+                with open(tmp.name, "rb") as f:
+                    data = f.read()
+                os.unlink(tmp.name)
+                return data, "jpeg"
+        except ImportError:
+            with open(image_path, "rb") as f:
+                return f.read(), "jpeg"
+        except Exception:
+            with open(image_path, "rb") as f:
+                return f.read(), "jpeg"
+
     def is_fatal(self) -> bool:
         """True если LocalAI перестал отвечать (превышен лимит ошибок)."""
         return self.consecutive_errors >= self.max_consecutive_errors
@@ -94,8 +127,8 @@ class LocalAIClient:
         
         for attempt in range(self.max_retries + 1):
             try:
-                with open(image_path, "rb") as f:
-                    img_b64 = base64.b64encode(f.read()).decode()
+                img_data, img_type = self._prepare_image_for_vl(image_path)
+                img_b64 = base64.b64encode(img_data).decode()
 
                 messages = [
                     {
@@ -106,7 +139,7 @@ class LocalAIClient:
                         "role": "user",
                         "content": [
                             {"type": "text", "text": f"Опиши это изображение.{f' Контекст: {context}' if context else ''}"},
-                            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}", "detail": "low"}},
+                            {"type": "image_url", "image_url": {"url": f"data:image/{img_type};base64,{img_b64}", "detail": "low"}},
                         ],
                     },
                 ]

@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import logging
+import os
+import subprocess
+import tempfile
 from typing import Optional
 
 from modules.base import BaseAnalyzer
 from models import FileInfo
 from analyzer import AUDIO_EXTS
+from config import ANALYSIS_AUDIO_TRANSCRIBE_SECONDS
 from metadata import read_audio_metadata
 
 logger = logging.getLogger(__name__)
@@ -37,11 +41,11 @@ class AudioAnalyzer(BaseAnalyzer):
         info = self._make_info(filepath)
         info.audio_metadata = read_audio_metadata(filepath)
 
-        # Транскрипция через Whisper
+        # Транскрипция через Whisper (только первые N секунд)
         transcript = ""
         if localai:
-            logger.info(f"  → Транскрипция аудио (whisperx-tiny)...")
-            transcript = localai.transcribe_audio(filepath)
+            logger.info(f"  → Транскрипция аудио (первые {ANALYSIS_AUDIO_TRANSCRIBE_SECONDS}с, whisperx-tiny)...")
+            transcript = self._transcribe_audio(filepath, localai, duration=ANALYSIS_AUDIO_TRANSCRIBE_SECONDS)
             info.audio_transcript = transcript
             logger.info(f"  ← Транскрипт: {len(transcript)} символов")
 
@@ -76,3 +80,31 @@ class AudioAnalyzer(BaseAnalyzer):
                 info.ai_description = f"Аудио {info.extension.upper()}"
 
         return info
+
+    def _transcribe_audio(self, filepath: str, localai, duration: int = 60) -> str:
+        """Транскрибировать первые N секунд аудио через whisper."""
+        tmp_audio = None
+        try:
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+                tmp_audio = tmp.name
+
+            r = subprocess.run(
+                ["ffmpeg", "-y", "-ss", "0", "-t", str(duration),
+                 "-i", filepath, "-vn", "-ac", "1", "-ar", "16000", tmp_audio],
+                capture_output=True, text=True, timeout=120,
+            )
+            if r.returncode != 0 or not os.path.exists(tmp_audio):
+                return ""
+
+            transcript = localai.transcribe_audio(tmp_audio)
+
+            return transcript
+        except Exception as e:
+            logger.debug(f"transcribe error: {e}")
+            return ""
+        finally:
+            if tmp_audio and os.path.exists(tmp_audio):
+                try:
+                    os.unlink(tmp_audio)
+                except Exception:
+                    pass

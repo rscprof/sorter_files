@@ -114,6 +114,32 @@ def is_build_artifact(filepath: str, project_root: str = "") -> bool:
     return False
 
 
+def is_mobile_project(filepath: str) -> bool:
+    """Проверить, является ли файл частью Android/Java/Kotlin проекта."""
+    p = Path(filepath)
+    mobile_indicators = {
+        "AndroidManifest.xml", "build.gradle", "build.gradle.kts",
+        "settings.gradle", "settings.gradle.kts", "gradle.properties",
+        "pom.xml", "AppModule.iml",
+    }
+    idea_indicators = {".idea", "*.iml"}
+    try:
+        project = find_project_root(filepath, max_depth=4)
+        if project:
+            proj_path = Path(project)
+            for f in proj_path.iterdir():
+                if f.name in mobile_indicators:
+                    return True
+                for ind in idea_indicators:
+                    if ind.startswith("*") and f.name.endswith(ind.lstrip("*")):
+                        return True
+                    elif f.name == ind:
+                        return True
+    except Exception:
+        pass
+    return False
+
+
 def get_directory_listing(dirpath: str, max_depth: int = 2, max_entries: int = 50) -> str:
     """Получить структуру каталога в текстовом виде."""
     lines = []

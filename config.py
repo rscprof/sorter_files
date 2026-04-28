@@ -39,8 +39,10 @@ DEFAULTS: dict[str, Any] = {
         "max_text_length": 5000,
         "pdf_max_pages": 5,
         "audio_transcribe_seconds": 60,
+        "video_transcribe_seconds": 60,
         "video_keyframes": 2,
         "large_file_threshold_mb": 500,
+        "vl_max_pixels": 1920,
     },
 
     "temp_file_patterns": [
@@ -60,6 +62,8 @@ DEFAULTS: dict[str, Any] = {
         # Android project indicators
         "AndroidManifest.xml", "local.properties", "gradle.properties",
         "settings.gradle", "settings.gradle.kts", ".idea/", ".iml",
+        # Visual Studio
+        "*.sln", "*.vcxproj", "*.vcxproj.filters",
         # Database indicators
         "ibdata1", "ib_logfile0", "ib_logfile1", "mysql-bin.index",
         "postmaster.pid", "postmaster.opts", "pg_hba.conf", "pg_ident.conf",
@@ -186,8 +190,10 @@ BUILD_ARTIFACT_PATTERNS: dict[str, list[str]] = _config.get("build_artifact_patt
 ANALYSIS_MAX_TEXT_LENGTH: int = _config.get("analysis", {}).get("max_text_length", DEFAULTS["analysis"]["max_text_length"])
 ANALYSIS_PDF_MAX_PAGES: int = _config.get("analysis", {}).get("pdf_max_pages", DEFAULTS["analysis"]["pdf_max_pages"])
 ANALYSIS_AUDIO_TRANSCRIBE_SECONDS: int = _config.get("analysis", {}).get("audio_transcribe_seconds", DEFAULTS["analysis"]["audio_transcribe_seconds"])
+ANALYSIS_VIDEO_TRANSCRIBE_SECONDS: int = _config.get("analysis", {}).get("video_transcribe_seconds", DEFAULTS["analysis"]["video_transcribe_seconds"])
 ANALYSIS_VIDEO_KEYFRAMES: int = _config.get("analysis", {}).get("video_keyframes", DEFAULTS["analysis"]["video_keyframes"])
 ANALYSIS_LARGE_FILE_THRESHOLD_MB: int = _config.get("analysis", {}).get("large_file_threshold_mb", DEFAULTS["analysis"]["large_file_threshold_mb"])
+ANALYSIS_VL_MAX_PIXELS: int = _config.get("analysis", {}).get("vl_max_pixels", DEFAULTS["analysis"]["vl_max_pixels"])
 
 # Derived paths (based on TARGET_DIR)
 DELETE_DIR: str = os.path.join(TARGET_DIR, "_на_удаление" if LANGUAGE == "ru" else "_delete_later")

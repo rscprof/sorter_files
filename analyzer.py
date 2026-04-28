@@ -73,6 +73,10 @@ def extract_text(filepath: str) -> str:
         if ext == "pptx":
             return _extract_pptx(filepath)
 
+        # LibreOffice ODF файлы
+        if ext in ("odt", "ods", "odp"):
+            return _extract_odf_text(filepath)
+
         if ext == "pdf":
             return _extract_pdf(filepath)
 
@@ -171,9 +175,29 @@ def _extract_office_text(filepath: str) -> str:
                 clean = re.sub(r"\s+", " ", clean).strip()
                 if clean:
                     text += clean + "\n"
-            return text[:10000] if text else f"[Office файл, размер: {os.path.getsize(filepath)} байт]"
+            return text[:10000] if text else "[Office файл, размер: {} байт]".format(os.path.getsize(filepath))
     except Exception:
-        return f"[Office файл, размер: {os.path.getsize(filepath)} байт]"
+        return "[Office файл, размер: {} байт]".format(os.path.getsize(filepath))
+
+
+def _extract_odf_text(filepath: str) -> str:
+    """Извлечь текст из ODF файлов (odt, ods, odp)."""
+    import zipfile
+    import re
+    try:
+        with zipfile.ZipFile(filepath) as zf:
+            text_parts = []
+            for name in zf.namelist():
+                if not name.endswith(".xml"):
+                    continue
+                raw = zf.read(name).decode("utf-8", errors="ignore")
+                clean = re.sub(r"<[^>]+>", " ", raw)
+                clean = re.sub(r"\s+", " ", clean).strip()
+                if clean:
+                    text_parts.append(clean)
+            return "\n".join(text_parts)[:10000] if text_parts else "[ODF файл, размер: {} байт]".format(os.path.getsize(filepath))
+    except Exception:
+        return "[ODF файл, размер: {} байт]".format(os.path.getsize(filepath))
 
 
 def _extract_pdf(filepath: str) -> str:
@@ -253,7 +277,7 @@ def _extract_doc(filepath: str) -> str:
             return result.stdout[:5000]
     except (FileNotFoundError, Exception):
         pass
-    return f"[DOC файл, размер: {os.path.getsize(filepath)} байт]"
+        return "[DOC файл, размер: {} байт]".format(os.path.getsize(filepath))
 
 
 def pdf_to_images(filepath: str, max_pages: int = 5) -> list[str]:
